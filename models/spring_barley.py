@@ -81,6 +81,9 @@ def detect_sowing(vv_series, vh_series, dates):
     
     for i in range(1, len(ratios)):
         if ratios[i] and ratios[i-1]:
+            # Only look for Spring Barley emergence April-June
+            if dates[i].month not in [4, 5, 6]:
+                continue
             # VH rising from low baseline = emergence after sowing
             if ratios[i] > ratios[i-1] * 1.05:
                 # Sowing approximately 14 days before emergence

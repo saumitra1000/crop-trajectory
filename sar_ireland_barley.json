@@ -1,0 +1,178 @@
+[
+  {
+    "date": "2025-04-01",
+    "vv": 53.44,
+    "vh": 8.0,
+    "rvi": 0.5208,
+    "available": true
+  },
+  {
+    "date": "2025-04-07",
+    "vv": 56.24,
+    "vh": 10.2083,
+    "rvi": 0.6145,
+    "available": true
+  },
+  {
+    "date": "2025-04-13",
+    "available": false,
+    "error": "HTTP 503"
+  },
+  {
+    "date": "2025-04-19",
+    "vv": 100.08,
+    "vh": 12.8,
+    "rvi": 0.4536,
+    "available": true
+  },
+  {
+    "date": "2025-04-25",
+    "vv": 64.12,
+    "vh": 8.125,
+    "rvi": 0.4499,
+    "available": true
+  },
+  {
+    "date": "2025-05-01",
+    "vv": 55.88,
+    "vh": 9.125,
+    "rvi": 0.5615,
+    "available": true
+  },
+  {
+    "date": "2025-05-07",
+    "vv": 52.52,
+    "vh": 8.0,
+    "rvi": 0.5288,
+    "available": true
+  },
+  {
+    "date": "2025-05-13",
+    "vv": 57.84,
+    "vh": 10.0833,
+    "rvi": 0.5938,
+    "available": true
+  },
+  {
+    "date": "2025-05-19",
+    "vv": 63.44,
+    "vh": 8.7083,
+    "rvi": 0.4828,
+    "available": true
+  },
+  {
+    "date": "2025-05-25",
+    "available": false,
+    "error": "HTTP 503"
+  },
+  {
+    "date": "2025-05-31",
+    "available": false,
+    "error": "HTTP 503"
+  },
+  {
+    "date": "2025-06-06",
+    "vv": 61.4,
+    "vh": 9.68,
+    "rvi": 0.5447,
+    "available": true
+  },
+  {
+    "date": "2025-06-12",
+    "vv": 69.72,
+    "vh": 9.6667,
+    "rvi": 0.4871,
+    "available": true
+  },
+  {
+    "date": "2025-06-18",
+    "vv": 63.84,
+    "vh": 10.75,
+    "rvi": 0.5765,
+    "available": true
+  },
+  {
+    "date": "2025-06-24",
+    "vv": 68.48,
+    "vh": 9.6,
+    "rvi": 0.4918,
+    "available": true
+  },
+  {
+    "date": "2025-06-30",
+    "vv": 63.92,
+    "vh": 11.5417,
+    "rvi": 0.6118,
+    "available": true
+  },
+  {
+    "date": "2025-07-06",
+    "vv": 51.76,
+    "vh": 8.6,
+    "rvi": 0.5699,
+    "available": true
+  },
+  {
+    "date": "2025-07-12",
+    "vv": 69.68,
+    "vh": 11.25,
+    "rvi": 0.556,
+    "available": true
+  },
+  {
+    "date": "2025-07-18",
+    "vv": 64.8,
+    "vh": 9.9167,
+    "rvi": 0.5309,
+    "available": true
+  },
+  {
+    "date": "2025-07-24",
+    "vv": 62.64,
+    "vh": 11.3333,
+    "rvi": 0.6128,
+    "available": true
+  },
+  {
+    "date": "2025-07-30",
+    "vv": 56.96,
+    "vh": 9.125,
+    "rvi": 0.5523,
+    "available": true
+  },
+  {
+    "date": "2025-08-05",
+    "vv": 59.64,
+    "vh": 9.44,
+    "rvi": 0.5466,
+    "available": true
+  },
+  {
+    "date": "2025-08-11",
+    "vv": 53.88,
+    "vh": 9.0417,
+    "rvi": 0.5748,
+    "available": true
+  },
+  {
+    "date": "2025-08-17",
+    "vv": 52.32,
+    "vh": 8.75,
+    "rvi": 0.5731,
+    "available": true
+  },
+  {
+    "date": "2025-08-23",
+    "vv": 56.8,
+    "vh": 8.5417,
+    "rvi": 0.5229,
+    "available": true
+  },
+  {
+    "date": "2025-08-29",
+    "vv": 58.52,
+    "vh": 8.64,
+    "rvi": 0.5146,
+    "available": true
+  }
+]
