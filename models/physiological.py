@@ -189,12 +189,22 @@ def get_current_physiology(observations, crop_type):
         [o["biomass_t_ha"] for o in timeseries if o["biomass_t_ha"]],
         default=0)
 
-    # LAI trend — last 3 observations
-    recent_lai = [o["lai"] for o in timeseries[-3:] if o["lai"]]
-    lai_trend = "increasing" if len(recent_lai) > 1 and \
-                recent_lai[-1] > recent_lai[0] else \
-                "declining" if len(recent_lai) > 1 and \
-                recent_lai[-1] < recent_lai[0] else "stable"
+    # LAI trend — use last 5 observations smoothed
+    recent_lai = [o["lai"] for o in timeseries[-5:] if o["lai"]]
+    if len(recent_lai) >= 3:
+        first_half = sum(recent_lai[:len(recent_lai)//2]) / (len(recent_lai)//2)
+        second_half = sum(recent_lai[len(recent_lai)//2:]) / len(recent_lai[len(recent_lai)//2:])
+        diff = second_half - first_half
+        if diff > 0.2:
+            lai_trend = "increasing"
+        elif diff < -0.2:
+            lai_trend = "declining"
+        else:
+            lai_trend = "stable"
+    elif len(recent_lai) > 1:
+        lai_trend = "increasing" if recent_lai[-1] > recent_lai[0] else "declining"
+    else:
+        lai_trend = "stable"
 
     return {
         "current_lai": latest["lai"],
