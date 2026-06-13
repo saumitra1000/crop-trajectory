@@ -302,3 +302,118 @@ def field_analysis_polygon(request: PolygonRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001, reload=False)
+
+
+class ParcelRequest(BaseModel):
+    parcel_id: str = None
+    lat: float
+    lng: float
+    bbox_km: float = 1.0
+
+
+@app.post("/parcel_intelligence")
+def parcel_intelligence(request: ParcelRequest):
+    """
+    Full crop intelligence for an Irish DAFM parcel.
+    Fetches real parcel polygon then runs full analysis.
+    """
+    try:
+        import requests as _req
+        from models.crop_classifier import full_field_analysis
+        from extractors.sar_polygon import get_sar_timeseries_polygon
+        from datetime import datetime
+
+        # Step 1 — Get DAFM parcel polygon
+        delta = request.bbox_km / 111.0
+        bbox_url = (
+            f"https://cube-earth.onrender.com/parcels_in_bbox"
+            f"?minlng={request.lng - delta}"
+            f"&minlat={request.lat - delta}"
+            f"&maxlng={request.lng + delta}"
+            f"&maxlat={request.lat + delta}"
+        )
+
+        r = _req.get(bbox_url, timeout=30)
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not fetch DAFM parcels")
+
+        features = r.json().get("features", [])
+        if not features:
+            raise HTTPException(
+                status_code=404,
+                detail="No DAFM parcels found at this location")
+
+        # Find closest parcel to point or match parcel_id
+        parcel = None
+        if request.parcel_id:
+            for f in features:
+                props = f.get("properties", {})
+                if request.parcel_id in [
+                    props.get("PAR_LAB", ""),
+                    props.get("HERD", "")
+                ]:
+                    parcel = f
+                    break
+
+        if not parcel:
+            parcel = features[0]
+
+        props = parcel["properties"]
+        coords = parcel["geometry"]["coordinates"][0]
+        crop = props.get("CROP", "Unknown")
+        area = props.get("CLAIM_AREA", 0)
+
+        # Step 2 — SAR polygon extraction
+        today = datetime.now()
+        season_start = datetime(
+            today.year-1, 10, 1).strftime("%Y-%m-%d")
+        season_end = today.strftime("%Y-%m-%d")
+
+        obs = get_sar_timeseries_polygon(
+            coords, season_start, season_end,
+            CLIENT_ID, CLIENT_SECRET,
+            interval_days=12
+        )
+        available = [o for o in obs if o.get("available")]
+
+        if not available:
+            raise HTTPException(
+                status_code=404,
+                detail="No SAR data for this parcel")
+
+        # Step 3 — Crop analysis
+        analysis = full_field_analysis(available)
+
+        # Step 4 — Field variability
+        variability = [o.get("field_variability", 0)
+                      for o in available]
+        avg_var = round(
+            sum(variability)/len(variability), 4) \
+            if variability else None
+
+        return {
+            "parcel": {
+                "crop_dafm": crop,
+                "area_ha": area,
+                "vertices": len(coords),
+                "observations": len(available)
+            },
+            "field_variability": {
+                "average": avg_var,
+                "interpretation": (
+                    "Uniform crop development"
+                    if avg_var and avg_var < 0.35 else
+                    "Moderate within-field variation"
+                    if avg_var and avg_var < 0.45 else
+                    "High within-field variation"
+                )
+            },
+            "crop_intelligence": analysis
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
