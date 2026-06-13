@@ -312,6 +312,7 @@ class ParcelRequest(BaseModel):
     lat: float
     lng: float
     bbox_km: float = 1.0
+    crop_hint: str = None
 
 
 @app.post("/parcel_intelligence")
@@ -367,6 +368,9 @@ def parcel_intelligence(request: ParcelRequest):
         coords = parcel["geometry"]["coordinates"][0]
         crop = props.get("CROP", "Unknown")
         area = props.get("CLAIM_AREA", 0)
+        # Frontend can pass known crop type as hint
+        if request.crop_hint and (not crop or crop == "Unknown"):
+            crop = request.crop_hint
 
         # Step 2 — SAR polygon extraction
         today = datetime.now()
