@@ -416,6 +416,9 @@ def parcel_intelligence(request: ParcelRequest):
             analysis["field_analysis"]["classification_reasons"] = [
                 f"Crop type obtained from official DAFM parcel record: {crop}"
             ]
+            # Rename confidence field for DAFM-sourced crops
+            analysis["field_analysis"]["parcel_confidence"] = "HIGH"
+            analysis["field_analysis"].pop("growth_model_confidence", None)
 
             # Override growth model for grassland
             if mapped_crop == "Grassland":
