@@ -393,8 +393,17 @@ def parcel_intelligence(request: ParcelRequest):
             sum(variability)/len(variability), 4)             if variability else 0
 
         # Crop analysis
+        # Use Ireland-specific classifier when DAFM parcel data available
+        from models.crop_classifier_ireland import classify_ireland
         from models.crop_classifier import full_field_analysis
+        ireland_result = classify_ireland(available)
         analysis = full_field_analysis(available)
+        # Override with Ireland classifier if no DAFM crop match
+        if crop not in dafm_crop_map:
+            analysis["field_analysis"]["crop_type"] = ireland_result["crop_type"]
+            analysis["field_analysis"]["classification_confidence"] = ireland_result["confidence_pct"]
+            analysis["field_analysis"]["classification_reasons"] = ireland_result.get("classification_reasons", [])
+            analysis["field_analysis"]["crop_source"] = ireland_result.get("signature_source", "Irish SAR classifier")
         
         # Override classifier with DAFM known crop
         dafm_crop_map = {
