@@ -417,9 +417,10 @@ def parcel_intelligence(request: ParcelRequest):
                 analysis["field_analysis"]["current_stage"] = f"Permanent Pasture — {trend}"
                 analysis["field_analysis"]["yield_estimate_tha"] = None
                 analysis["field_analysis"]["yield_range"] = None
+                field_var = avg_var if avg_var else 0
                 analysis["field_analysis"]["management_alerts"] = [
                     f"Grass RVI: {avg_rvi} — {'Good grazing cover' if avg_rvi and avg_rvi > 0.55 else 'Monitor grass growth'}",
-                    "Variability indicates mixed sward condition" if (avg_var or 0) > 0.4 else "Uniform sward"
+                    "Variability indicates mixed sward condition" if field_var > 0.4 else "Uniform sward"
                 ]
         else:
             analysis["field_analysis"]["crop_source"] = "SAR classifier"
