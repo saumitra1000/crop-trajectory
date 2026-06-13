@@ -202,6 +202,103 @@ def thermal_stress(request: FieldRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class PolygonRequest(BaseModel):
+    polygon: list
+    crop: str = None
+    sowing_date: str = None
+    start_date: str = None
+    end_date: str = None
+    interval_days: int = 12
+
+
+@app.post("/sar_polygon")
+def sar_polygon(request: PolygonRequest):
+    """
+    SAR time series for a field polygon.
+    Returns field-level zonal statistics.
+    Input: GeoJSON polygon coordinates [[lng,lat],...]
+    """
+    try:
+        from extractors.sar_polygon import get_sar_timeseries_polygon
+        from datetime import datetime
+
+        today = datetime.now()
+        start = request.start_date or             datetime(today.year-1, 10, 1).strftime("%Y-%m-%d")
+        end = request.end_date or today.strftime("%Y-%m-%d")
+
+        results = get_sar_timeseries_polygon(
+            request.polygon,
+            start, end,
+            CLIENT_ID, CLIENT_SECRET,
+            request.interval_days
+        )
+        available = [r for r in results if r.get("available")]
+        return {
+            "observations": len(available),
+            "start_date": start,
+            "end_date": end,
+            "polygon_vertices": len(request.polygon),
+            "data": available
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/field_analysis_polygon")
+def field_analysis_polygon(request: PolygonRequest):
+    """
+    Full crop analysis for a field polygon.
+    More accurate than point-based analysis.
+    """
+    try:
+        from extractors.sar_polygon import get_sar_timeseries_polygon
+        from models.crop_classifier import full_field_analysis
+        from datetime import datetime
+
+        today = datetime.now()
+        start = request.start_date or             datetime(today.year-1, 10, 1).strftime("%Y-%m-%d")
+        end = request.end_date or today.strftime("%Y-%m-%d")
+
+        # Get polygon SAR data
+        results = get_sar_timeseries_polygon(
+            request.polygon,
+            start, end,
+            CLIENT_ID, CLIENT_SECRET,
+            request.interval_days
+        )
+        available = [r for r in results if r.get("available")]
+
+        if not available:
+            raise HTTPException(
+                status_code=404,
+                detail="No SAR data available for this polygon")
+
+        # Run crop analysis
+        analysis = full_field_analysis(available)
+
+        # Add field variability summary
+        variability = [r.get("field_variability", 0)
+                      for r in available]
+        avg_var = round(sum(variability)/len(variability), 4)             if variability else None
+
+        analysis["field_variability"] = {
+            "average": avg_var,
+            "interpretation": (
+                "Uniform crop development"
+                if avg_var and avg_var < 0.3 else
+                "Moderate within-field variation"
+                if avg_var and avg_var < 0.5 else
+                "High within-field variation — check for patches"
+            )
+        }
+
+        return analysis
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001, reload=False)

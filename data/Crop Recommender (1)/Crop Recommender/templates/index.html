@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crop Recommendation System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Add Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-top: 20px;
+        }
+        .container {
+            max-width: 900px;
+        }
+        .header {
+            text-align: center;
+            padding: 20px 0;
+            margin-bottom: 30px;
+            background: linear-gradient(135deg, #7CFC00, #228B22);
+            border-radius: 10px;
+            color: white;
+        }
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 25px;
+            border: none;
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card-header {
+            border-radius: 15px 15px 0 0 !important;
+            background-color: #6c757d;
+            color: white;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background-color: #228B22;
+            border-color: #228B22;
+        }
+        .btn-primary:hover {
+            background-color: #006400;
+            border-color: #006400;
+        }
+        #map {
+            height: 300px;
+            width: 100%;
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+        .crop-card {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+        }
+        .crop-name {
+            font-weight: bold;
+            color: #228B22;
+        }
+        .confidence-bar {
+            height: 8px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            margin-top: 5px;
+        }
+        .confidence-level {
+            height: 100%;
+            background-color: #228B22;
+            border-radius: 4px;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #228B22;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+            display: none;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Crop Recommendation System</h1>
+            <p class="lead">Find the best crops for your location based on soil and weather data</p>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">Location Selection</div>
+                    <div class="card-body">
+                        <div id="map"></div>
+                        <div class="mb-3">
+                            <label for="latitude" class="form-label">Latitude</label>
+                            <input type="number" class="form-control" id="latitude" step="0.000001" value="27.1751">
+                        </div>
+                        <div class="mb-3">
+                            <label for="longitude" class="form-label">Longitude</label>
+                            <input type="number" class="form-control" id="longitude" step="0.000001" value="78.0421">
+                        </div>
+                        <button id="recommendBtn" class="btn btn-primary w-100">Get Crop Recommendations</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">Recommendations</div>
+                    <div class="card-body">
+                        <div class="loader" id="loader"></div>
+                        <div id="results">
+                            <p class="text-muted text-center">Select a location to get crop recommendations</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">Environmental Data</div>
+                    <div class="card-body">
+                        <div id="envData">
+                            <p class="text-muted text-center">Location data will appear here</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Add Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        // Initialize Leaflet map (free alternative to Google Maps)
+        let map, marker;
+        
+        function initMap() {
+            // Default coordinates (Jalgaon, India)
+            const defaultLat = 21.0077;
+            const defaultLng = 75.5626;
+            
+            // Create map centered at default location
+            map = L.map('map').setView([defaultLat, defaultLng], 10);
+            
+            // Add OpenStreetMap tile layer
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            
+            // Add a draggable marker
+            marker = L.marker([defaultLat, defaultLng], {draggable: true}).addTo(map);
+            
+            // Update lat/lng input fields when marker is dragged
+            marker.on('dragend', function() {
+                const position = marker.getLatLng();
+                document.getElementById('latitude').value = position.lat.toFixed(6);
+                document.getElementById('longitude').value = position.lng.toFixed(6);
+            });
+            
+            // Update marker when lat/lng input fields change
+            document.getElementById('latitude').addEventListener('change', updateMarkerPosition);
+            document.getElementById('longitude').addEventListener('change', updateMarkerPosition);
+            
+            // Handle map clicks to move marker
+            map.on('click', function(e) {
+                marker.setLatLng(e.latlng);
+                document.getElementById('latitude').value = e.latlng.lat.toFixed(6);
+                document.getElementById('longitude').value = e.latlng.lng.toFixed(6);
+            });
+        }
+        
+        function updateMarkerPosition() {
+            const lat = parseFloat(document.getElementById('latitude').value);
+            const lng = parseFloat(document.getElementById('longitude').value);
+            
+            if (!isNaN(lat) && !isNaN(lng)) {
+                marker.setLatLng([lat, lng]);
+                map.setView([lat, lng]);
+            }
+        }
+        
+        // Initialize map when page loads
+        document.addEventListener('DOMContentLoaded', initMap);
+        
+        // Recommendation API call
+        document.getElementById('recommendBtn').addEventListener('click', async function() {
+            const latitude = document.getElementById('latitude').value;
+            const longitude = document.getElementById('longitude').value;
+            
+            if (!latitude || !longitude) {
+                alert('Please enter valid coordinates');
+                return;
+            }
+            
+            // Show loader
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('envData').innerHTML = '';
+            
+            try {
+                const response = await fetch('/recommend', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        latitude: parseFloat(latitude),
+                        longitude: parseFloat(longitude)
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    document.getElementById('results').innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                } else {
+                    // Display recommendations
+                    let resultsHtml = `<h5>Recommended Crops:</h5>`;
+                    data.crop_recommendations.forEach((rec, index) => {
+                        const confidencePercent = (rec.confidence * 100).toFixed(1);
+                        resultsHtml += `
+                        <div class="crop-card">
+                            <div class="d-flex justify-content-between">
+                                <span class="crop-name">${rec.crop.toUpperCase()}</span>
+                                <span>${confidencePercent}%</span>
+                            </div>
+                            <div class="confidence-bar">
+                                <div class="confidence-level" style="width: ${confidencePercent}%"></div>
+                            </div>
+                        </div>
+                        `;
+                    });
+                    document.getElementById('results').innerHTML = resultsHtml;
+                    
+                    // Display environmental data
+                    let envDataHtml = `<h5>Environmental Parameters:</h5>
+                                      <div class="table-responsive">
+                                          <table class="table table-sm">
+                                              <tbody>`;
+                                              
+                    // Display soil characteristics
+                    let soilData = data.soil_characteristics.validated || data.soil_characteristics.predicted;
+                    envDataHtml += `
+                        <tr>
+                            <th colspan="2" class="text-center bg-light">Soil Characteristics</th>
+                        </tr>`;
+                    for (const [key, value] of Object.entries(soilData)) {
+                        if (typeof value !== 'object') {
+                            envDataHtml += `
+                                <tr>
+                                    <th>${key}</th>
+                                    <td>${value}</td>
+                                </tr>
+                            `;
+                        }
+                    }
+                    
+                    // Display weather data if available
+                    if (data.weather_data) {
+                        envDataHtml += `
+                            <tr>
+                                <th colspan="2" class="text-center bg-light">Weather Conditions</th>
+                            </tr>
+                            <tr>
+                                <th>Temperature</th>
+                                <td>${data.weather_data.temperature}°C</td>
+                            </tr>
+                            <tr>
+                                <th>Humidity</th>
+                                <td>${data.weather_data.humidity}%</td>
+                            </tr>
+                            <tr>
+                                <th>Conditions</th>
+                                <td>${data.weather_data.description}</td>
+                            </tr>
+                            <tr>
+                                <th>Rainfall</th>
+                                <td>${data.weather_data.rainfall} mm</td>
+                            </tr>
+                        `;
+                    }
+                    
+                    envDataHtml += `</tbody></table></div>`;
+                    document.getElementById('envData').innerHTML = envDataHtml;
+                }
+            } catch (error) {
+                document.getElementById('results').innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+            } finally {
+                // Hide loader
+                document.getElementById('loader').style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
