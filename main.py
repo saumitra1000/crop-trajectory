@@ -413,6 +413,9 @@ def parcel_intelligence(request: ParcelRequest):
             analysis["field_analysis"]["crop_type"] = mapped_crop
             analysis["field_analysis"]["crop_source"] = "DAFM parcel data"
             analysis["field_analysis"]["classification_confidence"] = 100
+            analysis["field_analysis"]["classification_reasons"] = [
+                f"Crop type obtained from official DAFM parcel record: {crop}"
+            ]
 
             # Override growth model for grassland
             if mapped_crop == "Grassland":
