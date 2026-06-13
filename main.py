@@ -453,7 +453,7 @@ def parcel_intelligence(request: ParcelRequest):
                     "Variability indicates mixed sward condition" if field_var > 0.4 else "Uniform sward"
                 ]
                 # Replace arable growth model with clean grassland model
-                analysis["growth_model"] = {
+                grassland_model = {
                     "system": "grassland",
                     "crop": "Permanent Pasture",
                     "trend": trend,
@@ -467,6 +467,10 @@ def parcel_intelligence(request: ParcelRequest):
                     "field_variability": field_var,
                     "latest_observation": available[-1]["date"] if available else None
                 }
+                analysis["growth_model"] = grassland_model
+                # Also update crop_intelligence growth_model key
+                if "field_analysis" in analysis:
+                    analysis["field_analysis"]["growth_model"] = grassland_model
         else:
             analysis["field_analysis"]["crop_source"] = "SAR classifier"
 
