@@ -475,14 +475,23 @@ async def ecostress_products():
 async def ecostress_task_status(id: str):
     """Check status of a pending AppEEARS task"""
     import requests as req
-    token = os.environ.get("NASA_EARTHDATA_TOKEN", "")
-    if not token:
-        return {"error": "NASA_EARTHDATA_TOKEN not set"}
-    r = req.get(
-        f"https://appeears.earthdatacloud.nasa.gov/api/task/{id}",
-        headers={"Authorization": f"Bearer {token}"}, timeout=15
-    )
-    return r.json()
+    username = os.environ.get("NASA_EARTHDATA_USER", "")
+    password = os.environ.get("NASA_EARTHDATA_PASS", "")
+    APPEEARS = "https://appeears.earthdatacloud.nasa.gov/api"
+    login_r = req.post(f"{APPEEARS}/login", auth=(username, password), timeout=30)
+    token = login_r.json().get("token")
+    r = req.get(f"{APPEEARS}/task/{id}",
+                headers={"Authorization": f"Bearer {token}"}, timeout=15)
+    data = r.json()
+    # If done, also fetch download links
+    if data.get("status") == "done":
+        bundle = req.get(f"{APPEEARS}/bundle/{id}",
+                        headers={"Authorization": f"Bearer {token}"}, timeout=15)
+        files = bundle.json().get("files", [])
+        data["files"] = [{"name": f["file_name"],
+                          "size_mb": round(f.get("file_size",0)/1024/1024, 2)}
+                         for f in files]
+    return data
 
 
 if __name__ == "__main__":
