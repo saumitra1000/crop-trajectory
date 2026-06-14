@@ -464,16 +464,16 @@ async def ecostress_results(id: str):
             except: return None
         obs = {
             "date": row.get("Date",""),
-            "time": row.get("Time",""),
-            "et_daily_wm2": sf("ETdaily"),
-            "et_inst_wm2":  sf("PTJPLSMinst"),
-            "et_uncertainty": sf("ETinstUncertainty"),
-            "cloud": sf("cloud"),
+            "tile": row.get("ECOSTRESS_Tile",""),
+            "et_daily_wm2": sf("ECO_L3T_JET_002_ETdaily"),
+            "et_inst_wm2":  sf("ECO_L3T_JET_002_PTJPLSMinst"),
+            "et_uncertainty": sf("ECO_L3T_JET_002_ETinstUncertainty"),
+            "cloud": sf("ECO_L3T_JET_002_cloud"),
             "lat": sf("Latitude"),
             "lng": sf("Longitude")
         }
-        if obs["et_daily_wm2"] is not None:
-            observations.append(obs)
+        # Include all rows — even cloud covered (et will be None)
+        observations.append(obs)
 
     et_vals = [o["et_daily_wm2"] for o in observations if o["et_daily_wm2"]]
     return {
