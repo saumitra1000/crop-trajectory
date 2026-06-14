@@ -336,16 +336,16 @@ async def ecostress_et(lat: float, lng: float, days: int = 90):
     # Submit point sample request
     task = {
         "task_type": "point",
-        "task_name": f"et_{lat}_{lng}_{end_date.strftime('%Y%m%d')}",
+        "task_name": f"cubeearth_et_{end_date.strftime('%Y%m%d')}",
         "params": {
             "dates": [{
                 "startDate": start_date.strftime("%m-%d-%Y"),
                 "endDate": end_date.strftime("%m-%d-%Y")
             }],
             "layers": [
-                {"product": "ECO3ETPTJPL.001", "layer": "ETinst"},
-                {"product": "ECO3ETPTJPL.001", "layer": "ETdaily"},
-                {"product": "ECO3ETPTJPL.001", "layer": "ETinstUncertainty"}
+                {"product": "ECO_L3T_JET.002", "layer": "ETdaily"},
+                {"product": "ECO_L3T_JET.002", "layer": "ETinst"},
+                {"product": "ECO_L4T_ESI.002",  "layer": "ESIavg"}
             ],
             "coordinates": [{
                 "id": "parcel",
