@@ -448,8 +448,7 @@ async def ecostress_results(id: str):
         return {"error": "Empty CSV", "task_id": id,
                 "note": "No ECOSTRESS data at this location/time — outside ISS orbit coverage"}
 
-    lines = text.split("
-")
+    lines = text.splitlines()
     if len(lines) < 2:
         return {"error": "No data rows", "header": lines[0] if lines else ""}
 
