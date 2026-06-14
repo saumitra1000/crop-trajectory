@@ -413,8 +413,21 @@ def parcel_intelligence(request: ParcelRequest):
         # Use Ireland data-driven classifier for unknown crops
         from models.crop_classifier_ireland import classify_ireland
         from models.crop_classifier import full_field_analysis
+        from models.crop_identifier import analyse_time_series
         ireland_result = classify_ireland(available)
+        sar_time_series = analyse_time_series(available)
         analysis = full_field_analysis(available)
+
+        # Add SAR time series to response
+        analysis["sar_time_series"] = {
+            "crop_type": sar_time_series["crop_type"],
+            "confidence": sar_time_series["confidence"],
+            "growth_phase": sar_time_series["growth_phase"],
+            "evidence": sar_time_series["evidence"],
+            "key_events": sar_time_series["key_events"],
+            "seasonal_vh": sar_time_series["seasonal_vh"],
+            "vv_range": sar_time_series["vv_range"]
+        }
 
         # Override with Ireland classifier if no DAFM crop match
         if crop not in dafm_crop_map:
@@ -422,6 +435,24 @@ def parcel_intelligence(request: ParcelRequest):
             analysis["field_analysis"]["classification_confidence"] = ireland_result["confidence_pct"]
             analysis["field_analysis"]["classification_reasons"] = ireland_result.get("classification_reasons", [])
             analysis["field_analysis"]["crop_source"] = ireland_result.get("signature_source", "Irish SAR classifier")
+
+        # Compare DAFM declaration vs SAR time series
+        sar_crop = sar_time_series["crop_type"]
+        dafm_agrees_sar = (
+            crop in dafm_crop_map and
+            dafm_crop_map[crop] == sar_crop
+        ) or (
+            "Grass" in sar_crop and
+            any(g in crop for g in ["Pasture", "Grass", "Woodland"])
+        )
+        analysis["data_agreement"] = {
+            "dafm_2024": crop,
+            "sar_current": sar_crop,
+            "sar_confidence": sar_time_series["confidence"],
+            "agrees": dafm_agrees_sar,
+            "note": "DAFM and SAR agree" if dafm_agrees_sar else
+                    f"DAFM says {crop} but SAR suggests {sar_crop} — farmer confirmation recommended"
+        }
 
         if crop in dafm_crop_map:
             mapped_crop = dafm_crop_map[crop]
