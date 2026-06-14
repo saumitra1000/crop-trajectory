@@ -419,6 +419,79 @@ async def ecostress_products():
     return {"ecostress_products": eco, "total": len(eco)}
 
 
+@app.get("/ecostress_results")
+async def ecostress_results(id: str):
+    """Download and parse results from a completed AppEEARS task"""
+    import requests as req
+    username = os.environ.get("NASA_EARTHDATA_USER", "")
+    password = os.environ.get("NASA_EARTHDATA_PASS", "")
+    APPEEARS = "https://appeears.earthdatacloud.nasa.gov/api"
+    login_r = req.post(f"{APPEEARS}/login", auth=(username, password), timeout=30)
+    token = login_r.json().get("token")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Get file list
+    bundle = req.get(f"{APPEEARS}/bundle/{id}", headers=headers, timeout=15).json()
+    files = bundle.get("files", [])
+
+    csv_file = next((f for f in files if f["file_name"].endswith("-results.csv")), None)
+    if not csv_file:
+        return {"error": "No results CSV found", "files": [f["file_name"] for f in files]}
+
+    # Download CSV
+    csv_r = req.get(
+        f"{APPEEARS}/bundle/{id}/{csv_file['file_id']}",
+        headers=headers, timeout=60
+    )
+    text = csv_r.text.strip()
+    if not text:
+        return {"error": "Empty CSV", "task_id": id,
+                "note": "No ECOSTRESS data at this location/time — outside ISS orbit coverage"}
+
+    lines = text.split("
+")
+    if len(lines) < 2:
+        return {"error": "No data rows", "header": lines[0] if lines else ""}
+
+    header = lines[0].split(",")
+    observations = []
+    for line in lines[1:]:
+        if not line.strip(): continue
+        vals = line.split(",")
+        if len(vals) != len(header): continue
+        row = dict(zip(header, vals))
+        def sf(k):
+            try: v=float(row.get(k,"nan")); return None if v!=v else round(v,4)
+            except: return None
+        obs = {
+            "date": row.get("Date",""),
+            "time": row.get("Time",""),
+            "et_daily_wm2": sf("ETdaily"),
+            "et_inst_wm2":  sf("PTJPLSMinst"),
+            "et_uncertainty": sf("ETinstUncertainty"),
+            "cloud": sf("cloud"),
+            "lat": sf("Latitude"),
+            "lng": sf("Longitude")
+        }
+        if obs["et_daily_wm2"] is not None:
+            observations.append(obs)
+
+    et_vals = [o["et_daily_wm2"] for o in observations if o["et_daily_wm2"]]
+    return {
+        "task_id": id,
+        "total_rows": len(lines)-1,
+        "valid_et_observations": len(observations),
+        "et_summary": {
+            "mean_wm2": round(sum(et_vals)/len(et_vals),2) if et_vals else None,
+            "min_wm2":  round(min(et_vals),2) if et_vals else None,
+            "max_wm2":  round(max(et_vals),2) if et_vals else None,
+        } if et_vals else None,
+        "observations": observations[:20],
+        "source": "ECOSTRESS ECO_L3T_JET.002 via NASA AppEEARS",
+        "csv_preview": lines[:3]
+    }
+
+
 @app.get("/ecostress_task")
 async def ecostress_task_status(id: str):
     """Check status of a pending AppEEARS task"""
