@@ -433,6 +433,20 @@ async def ecostress_et(lat: float, lng: float, days: int = 90):
         return {"error": str(e)}
 
 
+@app.get("/ecostress_layers")
+async def ecostress_layers(product: str = "ECO_L3T_JET.002"):
+    """List layers for a specific ECOSTRESS product"""
+    import requests as req
+    username = os.environ.get("NASA_EARTHDATA_USER", "")
+    password = os.environ.get("NASA_EARTHDATA_PASS", "")
+    APPEEARS = "https://appeears.earthdatacloud.nasa.gov/api"
+    login_r = req.post(f"{APPEEARS}/login", auth=(username, password), timeout=30)
+    token = login_r.json().get("token")
+    r = req.get(f"{APPEEARS}/product/{product}",
+                headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    return {"product": product, "layers": r.json()}
+
+
 @app.get("/ecostress_products")
 async def ecostress_products():
     """List all available ECOSTRESS products"""
