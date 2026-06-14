@@ -344,8 +344,9 @@ async def ecostress_et(lat: float, lng: float, days: int = 90):
             }],
             "layers": [
                 {"product": "ECO_L3T_JET.002", "layer": "ETdaily"},
-                {"product": "ECO_L3T_JET.002", "layer": "ETinst"},
-                {"product": "ECO_L4T_ESI.002",  "layer": "ESIavg"}
+                {"product": "ECO_L3T_JET.002", "layer": "PTJPLSMinst"},
+                {"product": "ECO_L3T_JET.002", "layer": "ETinstUncertainty"},
+                {"product": "ECO_L3T_JET.002", "layer": "cloud"}
             ],
             "coordinates": [{
                 "id": "parcel",
@@ -410,11 +411,15 @@ async def ecostress_et(lat: float, lng: float, days: int = 90):
             if len(vals) == len(headers_row):
                 row = dict(zip(headers_row, vals))
                 try:
+                    def safe_float(v):
+                        try: return float(v)
+                        except: return None
                     observations.append({
                         "date": row.get("Date", ""),
-                        "et_daily_mm": float(row.get("ETdaily", "nan")),
-                        "et_inst_wm2": float(row.get("ETinst", "nan")),
-                        "et_uncertainty": float(row.get("ETinstUncertainty", "nan"))
+                        "et_daily_wm2": safe_float(row.get("ETdaily")),
+                        "et_inst_wm2":  safe_float(row.get("PTJPLSMinst")),
+                        "et_uncertainty_wm2": safe_float(row.get("ETinstUncertainty")),
+                        "cloud": safe_float(row.get("cloud"))
                     })
                 except ValueError:
                     continue
