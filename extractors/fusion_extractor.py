@@ -60,7 +60,9 @@ function setup(){
   return {
     input:[{bands:["B04","B05","B08","SCL"]}],
     output:[
-      {id:"indices",bands:3,sampleType:"FLOAT32"},
+      {id:"ndvi",bands:1,sampleType:"FLOAT32"},
+      {id:"clear",bands:1,sampleType:"FLOAT32"},
+      {id:"ndre",bands:1,sampleType:"FLOAT32"},
       {id:"dataMask",bands:1}
     ]
   };
@@ -69,10 +71,7 @@ function evaluatePixel(s){
   var clear=([3,8,9,10].includes(s.SCL))?0:1;
   var ndvi=(s.B08-s.B04)/(s.B08+s.B04+0.0001);
   var ndre=(s.B08-s.B05)/(s.B08+s.B05+0.0001);
-  return {
-    indices:[clear?ndvi:NaN, clear?ndre:NaN, clear],
-    dataMask:[1]
-  };
+  return {ndvi:[clear?ndvi:NaN], clear:[clear], ndre:[clear?ndre:NaN], dataMask:[1]};
 }
             """,
             "resx": res_x, "resy": res_y
@@ -95,17 +94,19 @@ function evaluatePixel(s){
         for interval in resp.json().get("data", []):
             date = interval.get("interval", {}).get("from", "")[:7]
             month = int(date.split("-")[1])
-            bands = interval.get("outputs", {}).get("indices", {}).get("bands", {})
-            ndvi = bands.get("B0", {}).get("stats", {}).get("mean")
-            ndre = bands.get("B1", {}).get("stats", {}).get("mean")
-            clear = bands.get("B2", {}).get("stats", {}).get("mean", 0)
-            n = bands.get("B0", {}).get("stats", {}).get("sampleCount", 0)
+            outputs = interval.get("outputs", {})
+            ndvi = outputs.get("ndvi",{}).get("bands",{}).get("B0",{}).get("stats",{}).get("mean")
+            clear = outputs.get("clear",{}).get("bands",{}).get("B0",{}).get("stats",{}).get("mean", 0)
+            ndre = outputs.get("ndre",{}).get("bands",{}).get("B0",{}).get("stats",{}).get("mean")
+            n = outputs.get("ndvi",{}).get("bands",{}).get("B0",{}).get("stats",{}).get("sampleCount", 0)
 
             # Only use if at least 20% of pixels are clear
             if isinstance(ndvi, float) and not np.isnan(ndvi) and isinstance(clear, float) and clear >= 0.2:
                 if month not in monthly_candidates:
                     monthly_candidates[month] = []
-                monthly_candidates[month].append((ndvi, ndre, clear, n))
+                # ndre is B2 — validate range (should be -1 to 1, not 0/1)
+                ndre_valid = ndre if (isinstance(ndre, float) and -1 < ndre < 1.01 and not np.isnan(ndre)) else None
+                monthly_candidates[month].append((ndvi, ndre_valid, clear, n))
 
     # Pick best observation per month (highest clear fraction)
     monthly_ndvi = {}
