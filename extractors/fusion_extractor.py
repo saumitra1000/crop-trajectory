@@ -23,7 +23,7 @@ def get_token(client_id, client_secret):
     return r.json().get("access_token")
 
 
-def get_optical_monthly(polygon, client_id, client_secret, token=None):
+def get_optical_monthly(polygon, client_id, client_secret, token=None, start_date="2025-10-01", end_date="2026-06-12"):
     """Extract monthly NDVI and NDRE via Sentinel-2 Statistics API"""
     if not token:
         token = get_token(client_id, client_secret)
@@ -51,8 +51,8 @@ def get_optical_monthly(polygon, client_id, client_secret, token=None):
                       "dataFilter": {"maxCloudCoverage": 100}}]  # no cloud filter — we mask per pixel
         },
         "aggregation": {
-            "timeRange": {"from": "2025-10-01T00:00:00Z",
-                          "to": "2026-06-13T23:59:59Z"},
+            "timeRange": {"from": f"{start_date}T00:00:00Z",
+                          "to": f"{end_date}T23:59:59Z"},
             "aggregationInterval": {"of": "P5D"},  # 5-day intervals = all acquisitions
             "evalscript": """
 //VERSION=3
@@ -121,7 +121,8 @@ function evaluatePixel(s){
 
 
 def extract_fusion_features(polygon, client_id, client_secret,
-                             sar_observations=None):
+                             sar_observations=None,
+                             start_date="2025-10-01", end_date="2026-06-12"):
     """
     Extract full feature vector for CropFusion classifier.
     
@@ -136,7 +137,7 @@ def extract_fusion_features(polygon, client_id, client_secret,
     if sar_observations is None:
         from extractors.sar_polygon import get_sar_timeseries_polygon
         sar_obs = get_sar_timeseries_polygon(
-            polygon, "2025-10-01", "2026-06-12",
+            polygon, start_date, end_date,
             client_id, client_secret, interval_days=12
         )
         available = [o for o in sar_obs if o.get("available")]
@@ -166,7 +167,7 @@ def extract_fusion_features(polygon, client_id, client_secret,
     monthly_vv = {m: round(np.mean(v), 3) for m, v in monthly_vv_raw.items()}
 
     # Optical extraction
-    monthly_ndvi, monthly_ndre = get_optical_monthly(polygon, client_id, client_secret, token)
+    monthly_ndvi, monthly_ndre = get_optical_monthly(polygon, client_id, client_secret, token, start_date=start_date, end_date=end_date)
 
     # Interpolate missing optical months
     def interpolate_monthly(monthly_dict, months=range(1,13)):
