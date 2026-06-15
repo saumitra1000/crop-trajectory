@@ -23,99 +23,161 @@ def get_token(client_id, client_secret):
     return r.json().get("access_token")
 
 
-def get_optical_monthly(polygon, client_id, client_secret, token=None, start_date="2025-10-01", end_date="2026-06-12"):
-    """Extract monthly NDVI and NDRE via Sentinel-2 Statistics API"""
-    if not token:
-        token = get_token(client_id, client_secret)
+def get_optical_monthly(polygon, client_id, client_secret, token=None,
+                        start_date="2025-10-01", end_date="2026-06-12"):
+    """Extract monthly NDVI and NDRE via Element84 STAC + COG — free, no CDSE PU"""
+    import struct, zlib
+    from numpy.linalg import lstsq
 
     lngs = [c[0] for c in polygon]
-    lats = [c[1] for c in polygon]
-    bbox = [min(lngs), min(lats), max(lngs), max(lats)]
+    lats  = [c[1] for c in polygon]
+    bbox  = [min(lngs), min(lats), max(lngs), max(lats)]
+    lat_c = (bbox[1] + bbox[3]) / 2
+    lng_c = (bbox[0] + bbox[2]) / 2
 
-    # Use fixed pixel dimensions instead of resolution
-    # API limit: max 1500 pixels per side
-    # Target: ~128 pixels max per side for speed
-    bbox_width_deg = bbox[2] - bbox[0]
-    bbox_height_deg = bbox[3] - bbox[1]
-    target_pixels = 64
-    res_x = bbox_width_deg / target_pixels
-    res_y = bbox_height_deg / target_pixels
-    res = max(res_x, res_y, 10/111000)  # min 10m equiv
+    def fetch_range(url, start, end):
+        r = requests.get(url, headers={"Range": f"bytes={start}-{end-1}"}, timeout=30)
+        if r.status_code not in [200, 206]:
+            raise Exception(f"HTTP {r.status_code}")
+        return r.content
 
-    # Use 5-day intervals to get all acquisitions then pick best per month
-    payload = {
-        "input": {
-            "bounds": {"bbox": bbox,
-                       "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/4326"}},
-            "data": [{"type": "sentinel-2-l2a",
-                      "dataFilter": {"maxCloudCoverage": 100}}]  # no cloud filter — we mask per pixel
-        },
-        "aggregation": {
-            "timeRange": {"from": f"{start_date}T00:00:00Z",
-                          "to": f"{end_date}T23:59:59Z"},
-            "aggregationInterval": {"of": "P5D"},  # 5-day intervals = all acquisitions
-            "evalscript": """
-//VERSION=3
-function setup(){
-  return {
-    input:[{bands:["B04","B05","B08","SCL"]}],
-    output:[
-      {id:"ndvi",bands:1,sampleType:"FLOAT32"},
-      {id:"clear",bands:1,sampleType:"FLOAT32"},
-      {id:"ndre",bands:1,sampleType:"FLOAT32"},
-      {id:"dataMask",bands:1}
-    ]
-  };
-}
-function evaluatePixel(s){
-  var clear=([3,8,9,10].includes(s.SCL))?0:1;
-  var ndvi=(s.B08-s.B04)/(s.B08+s.B04+0.0001);
-  var ndre=(s.B08-s.B05)/(s.B08+s.B05+0.0001);
-  return {ndvi:[clear?ndvi:NaN], clear:[clear], ndre:[clear?ndre:NaN], dataMask:[1]};
-}
-            """,
-            "resx": res_x, "resy": res_y
-        },
-        "calculations": {"default": {}}
-    }
+    def read_s2_pixel(url, lat, lng):
+        """Read S2 COG pixel using ModelPixelScale + tiepoint georeferencing"""
+        try:
+            fmt = "<"
+            header = fetch_range(url, 0, 65536)
+            ifd_offset = struct.unpack_from(f"{fmt}I", header, 4)[0]
+            n_tags = struct.unpack_from(f"{fmt}H", header, ifd_offset)[0]
+            tags = {}
+            for i in range(n_tags):
+                off = ifd_offset + 2 + i * 12
+                if off + 12 > len(header): break
+                tag = struct.unpack_from(f"{fmt}H", header, off)[0]
+                typ = struct.unpack_from(f"{fmt}H", header, off+2)[0]
+                cnt = struct.unpack_from(f"{fmt}I", header, off+4)[0]
+                val = struct.unpack_from(f"{fmt}I", header, off+8)[0]
+                tags[tag] = (typ, cnt, val)
 
-    resp = requests.post(
-        "https://sh.dataspace.copernicus.eu/api/v1/statistics",
-        json=payload,
-        headers={"Authorization": f"Bearer {token}",
-                 "Content-Type": "application/json"},
-        timeout=90)
+            width  = tags[256][2]; height = tags[257][2]
+            tile_w = tags[322][2]; tile_h = tags[323][2]
+            tile_off_ptr  = tags[324][2]; n_tiles_count = tags[324][1]
+            tile_byte_ptr = tags[325][2]
 
-    # Aggregate to monthly — take best observation per month
-    # (highest clear pixel fraction)
-    monthly_candidates = {}  # month -> list of (ndvi, ndre, clear_pct)
+            # Try ModelPixelScale (tag 33550) first
+            if 33550 in tags:
+                scale_off = tags[33550][2]
+                scale_data = fetch_range(url, scale_off, scale_off + 24)
+                sx = struct.unpack_from(f"{fmt}d", scale_data, 0)[0]
+                sy = struct.unpack_from(f"{fmt}d", scale_data, 8)[0]
+                tie_off = tags[33922][2]
+                tie_data = fetch_range(url, tie_off, tie_off + 48)
+                tie_x = struct.unpack_from(f"{fmt}d", tie_data, 24)[0]
+                tie_y = struct.unpack_from(f"{fmt}d", tie_data, 32)[0]
+                col = int((lng - tie_x) / sx)
+                row = int((tie_y - lat) / sy)
+            else:
+                # GCP-based (tag 33922 with multiple tiepoints)
+                tie_off = tags[33922][2]; tie_cnt = tags[33922][1]
+                tie_data = fetch_range(url, tie_off, tie_off + tie_cnt * 8)
+                gcps = []
+                for i in range(tie_cnt // 6):
+                    o = i * 48
+                    px = struct.unpack_from(f"{fmt}d", tie_data, o)[0]
+                    py = struct.unpack_from(f"{fmt}d", tie_data, o+8)[0]
+                    gx = struct.unpack_from(f"{fmt}d", tie_data, o+24)[0]
+                    gy = struct.unpack_from(f"{fmt}d", tie_data, o+32)[0]
+                    gcps.append((px, py, gx, gy))
+                cols_a = np.array([g[0] for g in gcps])
+                rows_a = np.array([g[1] for g in gcps])
+                lngs_a = np.array([g[2] for g in gcps])
+                lats_a = np.array([g[3] for g in gcps])
+                A = np.column_stack([lngs_a, lats_a, np.ones(len(gcps))])
+                cc, _, _, _ = lstsq(A, cols_a, rcond=None)
+                rc, _, _, _ = lstsq(A, rows_a, rcond=None)
+                col = int(cc[0]*lng + cc[1]*lat + cc[2])
+                row = int(rc[0]*lng + rc[1]*lat + rc[2])
 
-    if resp.status_code == 200:
-        for interval in resp.json().get("data", []):
-            date = interval.get("interval", {}).get("from", "")[:7]
-            month = int(date.split("-")[1])
-            outputs = interval.get("outputs", {})
-            ndvi = outputs.get("ndvi",{}).get("bands",{}).get("B0",{}).get("stats",{}).get("mean")
-            clear = outputs.get("clear",{}).get("bands",{}).get("B0",{}).get("stats",{}).get("mean", 0)
-            ndre = outputs.get("ndre",{}).get("bands",{}).get("B0",{}).get("stats",{}).get("mean")
-            n = outputs.get("ndvi",{}).get("bands",{}).get("B0",{}).get("stats",{}).get("sampleCount", 0)
+            if not (0 <= col < width and 0 <= row < height):
+                return None
 
-            # Only use if at least 20% of pixels are clear
-            if isinstance(ndvi, float) and not np.isnan(ndvi) and isinstance(clear, float) and clear >= 0.2:
-                if month not in monthly_candidates:
-                    monthly_candidates[month] = []
-                # ndre is B2 — validate range (should be -1 to 1, not 0/1)
-                ndre_valid = ndre if (isinstance(ndre, float) and -1 < ndre < 1.01 and not np.isnan(ndre)) else None
-                monthly_candidates[month].append((ndvi, ndre_valid, clear, n))
+            tiles_across = (width + tile_w - 1) // tile_w
+            tile_idx = (row // tile_h) * tiles_across + (col // tile_w)
+            off_data  = fetch_range(url, tile_off_ptr,  tile_off_ptr  + n_tiles_count * 4)
+            size_data = fetch_range(url, tile_byte_ptr, tile_byte_ptr + n_tiles_count * 4)
+            t_offset = struct.unpack_from(f"{fmt}I", off_data,  tile_idx * 4)[0]
+            t_size   = struct.unpack_from(f"{fmt}I", size_data, tile_idx * 4)[0]
+            if t_size == 0: return None
 
-    # Pick best observation per month (highest clear fraction)
+            tile_raw = fetch_range(url, t_offset, t_offset + t_size)
+            try:    raw = zlib.decompress(tile_raw)
+            except:
+                try: raw = zlib.decompress(tile_raw, -15)
+                except: raw = tile_raw
+
+            lc = col % tile_w; lr = row % tile_h
+            bits = tags.get(258,(0,0,16))[2]
+            bpp  = bits // 8
+            px_off = (lr * tile_w + lc) * bpp
+            if px_off + bpp > len(raw): return None
+            if bpp == 2:
+                dn = struct.unpack_from(f"{fmt}H", raw, px_off)[0]
+            else:
+                dn = struct.unpack_from(f"{fmt}B", raw, px_off)[0]
+            return dn if dn > 0 else None
+        except Exception:
+            return None
+
+    # Search for S2 scenes
+    try:
+        r = requests.post(
+            "https://earth-search.aws.element84.com/v1/search",
+            json={
+                "collections": ["sentinel-2-l2a"],
+                "bbox": bbox,
+                "datetime": f"{start_date}T00:00:00Z/{end_date}T23:59:59Z",
+                "limit": 200
+            }, timeout=30
+        )
+        features = r.json().get("features", [])
+    except Exception:
+        return {}, {}
+
+    # Best observation per month (lowest cloud cover)
+    monthly_candidates = {}
+
+    for f in features:
+        date_str = f["properties"].get("datetime","")[:10]
+        if not date_str: continue
+        month = int(date_str.split("-")[1])
+        cloud = f["properties"].get("eo:cloud_cover", 100)
+        if cloud > 85: continue  # skip very cloudy
+
+        assets = f.get("assets", {})
+        red_url = assets.get("red",{}).get("href","")
+        nir_url = assets.get("nir",{}).get("href","")
+        re1_url = assets.get("rededge1",{}).get("href","")
+        scl_url = assets.get("scl",{}).get("href","")
+        if not red_url or not nir_url: continue
+
+        if month not in monthly_candidates or cloud < monthly_candidates[month][0]:
+            monthly_candidates[month] = (cloud, red_url, nir_url, re1_url, date_str)
+
     monthly_ndvi = {}
     monthly_ndre = {}
-    for month, candidates in monthly_candidates.items():
-        best = max(candidates, key=lambda x: x[2])
-        monthly_ndvi[month] = round(best[0], 4)
-        if isinstance(best[1], float) and not np.isnan(best[1]):
-            monthly_ndre[month] = round(best[1], 4)
+
+    for month, (cloud, red_url, nir_url, re1_url, date_str) in monthly_candidates.items():
+        red_dn = read_s2_pixel(red_url, lat_c, lng_c)
+        nir_dn = read_s2_pixel(nir_url, lat_c, lng_c)
+        re1_dn = read_s2_pixel(re1_url, lat_c, lng_c) if re1_url else None
+
+        if red_dn and nir_dn and red_dn > 0:
+            ndvi = (nir_dn - red_dn) / (nir_dn + red_dn + 0.0001)
+            if -1 < ndvi < 1.5:
+                monthly_ndvi[month] = round(ndvi, 4)
+            if re1_dn and re1_dn > 0:
+                ndre = (nir_dn - re1_dn) / (nir_dn + re1_dn + 0.0001)
+                if -1 < ndre < 1.5:
+                    monthly_ndre[month] = round(ndre, 4)
 
     return monthly_ndvi, monthly_ndre
 
