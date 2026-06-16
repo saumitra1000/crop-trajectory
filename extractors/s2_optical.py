@@ -122,10 +122,16 @@ def get_optical_monthly(polygon, start_date, end_date):
             if margin<0.05: continue
         if month not in monthly_candidates or cloud<monthly_candidates[month][0]:
             monthly_candidates[month]=(cloud,f)
-    step=max(1,len(polygon)//8)
-    pts=[(polygon[i][1],polygon[i][0]) for i in range(0,len(polygon),step)]
-    pts.append((lat_c,lng_c))
-    pts=pts[:10]
+    # Use centroid + 4 interior offsets — fast, avoids large bbox
+    lats=[c[1] for c in polygon]; lngs=[c[0] for c in polygon]
+    lat_r=(max(lats)-min(lats))*0.2; lng_r=(max(lngs)-min(lngs))*0.2
+    pts=[
+        (lat_c,        lng_c),
+        (lat_c+lat_r,  lng_c+lng_r),
+        (lat_c-lat_r,  lng_c-lng_r),
+        (lat_c+lat_r,  lng_c-lng_r),
+        (lat_c-lat_r,  lng_c+lng_r),
+    ]
     monthly_ndvi={}; monthly_ndre={}
     for month,(cloud,scene) in sorted(monthly_candidates.items()):
         try:
