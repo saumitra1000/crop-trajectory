@@ -25,24 +25,35 @@ def get_token(client_id, client_secret):
 
 def get_optical_monthly(polygon, client_id, client_secret, token=None,
                         start_date="2025-10-01", end_date="2026-06-12"):
-    """Extract monthly NDVI and NDRE via Element84 STAC + COG — free, no CDSE PU"""
-    import struct, zlib
-    from numpy.linalg import lstsq
+    """Extract monthly NDVI and NDRE via Element84 STAC + S2 COG — free"""
+    import struct, zlib, math
 
-    lngs = [c[0] for c in polygon]
-    lats  = [c[1] for c in polygon]
-    bbox  = [min(lngs), min(lats), max(lngs), max(lats)]
-    lat_c = (bbox[1] + bbox[3]) / 2
-    lng_c = (bbox[0] + bbox[2]) / 2
+    def latlon_to_utm(lat, lng):
+        """WGS84 to UTM — auto zone for Ireland (29N)"""
+        a = 6378137.0; f = 1/298.257223563
+        b = a*(1-f); e2 = 1-(b/a)**2
+        k0 = 0.9996
+        # Zone from longitude
+        zone = int((lng + 180) / 6) + 1
+        lon0 = math.radians((zone - 1) * 6 - 180 + 3)
+        lat_r = math.radians(lat); lng_r = math.radians(lng)
+        N = a/math.sqrt(1-e2*math.sin(lat_r)**2)
+        T = math.tan(lat_r)**2
+        A_ = math.cos(lat_r)*(lng_r-lon0)
+        M = a*((1-e2/4-3*e2**2/64)*lat_r
+               -(3*e2/8+3*e2**2/32)*math.sin(2*lat_r)
+               +(15*e2**2/256)*math.sin(4*lat_r))
+        x = k0*N*(A_+(1-T)*A_**3/6) + 500000
+        y = k0*(M+N*math.tan(lat_r)*(A_**2/2))
+        return x, y
 
-    def fetch_range(url, start, end):
-        r = requests.get(url, headers={"Range": f"bytes={start}-{end-1}"}, timeout=30)
+    def fetch_range(url, s, e):
+        r = requests.get(url, headers={"Range": f"bytes={s}-{e-1}"}, timeout=30)
         if r.status_code not in [200, 206]:
             raise Exception(f"HTTP {r.status_code}")
         return r.content
 
     def read_s2_pixel(url, lat, lng):
-        """Read S2 COG pixel using ModelPixelScale + tiepoint georeferencing"""
         try:
             fmt = "<"
             header = fetch_range(url, 0, 65536)
@@ -50,8 +61,8 @@ def get_optical_monthly(polygon, client_id, client_secret, token=None,
             n_tags = struct.unpack_from(f"{fmt}H", header, ifd_offset)[0]
             tags = {}
             for i in range(n_tags):
-                off = ifd_offset + 2 + i * 12
-                if off + 12 > len(header): break
+                off = ifd_offset + 2 + i*12
+                if off+12 > len(header): break
                 tag = struct.unpack_from(f"{fmt}H", header, off)[0]
                 typ = struct.unpack_from(f"{fmt}H", header, off+2)[0]
                 cnt = struct.unpack_from(f"{fmt}I", header, off+4)[0]
@@ -60,122 +71,114 @@ def get_optical_monthly(polygon, client_id, client_secret, token=None,
 
             width  = tags[256][2]; height = tags[257][2]
             tile_w = tags[322][2]; tile_h = tags[323][2]
-            tile_off_ptr  = tags[324][2]; n_tiles_count = tags[324][1]
+            tile_off_ptr  = tags[324][2]; n_tiles = tags[324][1]
             tile_byte_ptr = tags[325][2]
+            tag_type = tags[324][0]
+            bpe = 8 if tag_type == 16 else 4
+            fmt_c = "Q" if tag_type == 16 else "I"
 
-            # Try ModelPixelScale (tag 33550) first
-            if 33550 in tags:
-                scale_off = tags[33550][2]
-                scale_data = fetch_range(url, scale_off, scale_off + 24)
-                sx = struct.unpack_from(f"{fmt}d", scale_data, 0)[0]
-                sy = struct.unpack_from(f"{fmt}d", scale_data, 8)[0]
-                tie_off = tags[33922][2]
-                tie_data = fetch_range(url, tie_off, tie_off + 48)
-                tie_x = struct.unpack_from(f"{fmt}d", tie_data, 24)[0]
-                tie_y = struct.unpack_from(f"{fmt}d", tie_data, 32)[0]
-                col = int((lng - tie_x) / sx)
-                row = int((tie_y - lat) / sy)
-            else:
-                # GCP-based (tag 33922 with multiple tiepoints)
-                tie_off = tags[33922][2]; tie_cnt = tags[33922][1]
-                tie_data = fetch_range(url, tie_off, tie_off + tie_cnt * 8)
-                gcps = []
-                for i in range(tie_cnt // 6):
-                    o = i * 48
-                    px = struct.unpack_from(f"{fmt}d", tie_data, o)[0]
-                    py = struct.unpack_from(f"{fmt}d", tie_data, o+8)[0]
-                    gx = struct.unpack_from(f"{fmt}d", tie_data, o+24)[0]
-                    gy = struct.unpack_from(f"{fmt}d", tie_data, o+32)[0]
-                    gcps.append((px, py, gx, gy))
-                cols_a = np.array([g[0] for g in gcps])
-                rows_a = np.array([g[1] for g in gcps])
-                lngs_a = np.array([g[2] for g in gcps])
-                lats_a = np.array([g[3] for g in gcps])
-                A = np.column_stack([lngs_a, lats_a, np.ones(len(gcps))])
-                cc, _, _, _ = lstsq(A, cols_a, rcond=None)
-                rc, _, _, _ = lstsq(A, rows_a, rcond=None)
-                col = int(cc[0]*lng + cc[1]*lat + cc[2])
-                row = int(rc[0]*lng + rc[1]*lat + rc[2])
+            # UTM georef
+            ux, uy = latlon_to_utm(lat, lng)
+            scale_data = fetch_range(url, tags[33550][2], tags[33550][2]+24)
+            sx = struct.unpack_from(f"{fmt}d", scale_data, 0)[0]
+            sy = struct.unpack_from(f"{fmt}d", scale_data, 8)[0]
+            tie_data = fetch_range(url, tags[33922][2], tags[33922][2]+48)
+            tie_x = struct.unpack_from(f"{fmt}d", tie_data, 24)[0]
+            tie_y = struct.unpack_from(f"{fmt}d", tie_data, 32)[0]
 
+            col = int((ux - tie_x) / sx)
+            row = int((tie_y - uy) / sy)
             if not (0 <= col < width and 0 <= row < height):
                 return None
 
-            tiles_across = (width + tile_w - 1) // tile_w
-            tile_idx = (row // tile_h) * tiles_across + (col // tile_w)
-            off_data  = fetch_range(url, tile_off_ptr,  tile_off_ptr  + n_tiles_count * 4)
-            size_data = fetch_range(url, tile_byte_ptr, tile_byte_ptr + n_tiles_count * 4)
-            t_offset = struct.unpack_from(f"{fmt}I", off_data,  tile_idx * 4)[0]
-            t_size   = struct.unpack_from(f"{fmt}I", size_data, tile_idx * 4)[0]
-            if t_size == 0: return None
+            tiles_across = (width+tile_w-1)//tile_w
+            tile_idx = (row//tile_h)*tiles_across + (col//tile_w)
 
-            tile_raw = fetch_range(url, t_offset, t_offset + t_size)
+            off_d  = fetch_range(url, tile_off_ptr,  tile_off_ptr  + n_tiles*bpe)
+            size_d = fetch_range(url, tile_byte_ptr, tile_byte_ptr + n_tiles*bpe)
+            t_off  = struct.unpack_from(f"{fmt}{fmt_c}", off_d,  tile_idx*bpe)[0]
+            t_size = struct.unpack_from(f"{fmt}{fmt_c}", size_d, tile_idx*bpe)[0]
+            if t_size == 0 or t_size > 10_000_000: return None
+
+            tile_raw = fetch_range(url, t_off, t_off+t_size)
             try:    raw = zlib.decompress(tile_raw)
             except:
                 try: raw = zlib.decompress(tile_raw, -15)
                 except: raw = tile_raw
 
-            lc = col % tile_w; lr = row % tile_h
-            bits = tags.get(258,(0,0,16))[2]
-            bpp  = bits // 8
-            px_off = (lr * tile_w + lc) * bpp
-            if px_off + bpp > len(raw): return None
-            if bpp == 2:
-                dn = struct.unpack_from(f"{fmt}H", raw, px_off)[0]
-            else:
-                dn = struct.unpack_from(f"{fmt}B", raw, px_off)[0]
-            return dn if dn > 0 else None
+            lc = col%tile_w; lr = row%tile_h
+            px_off = (lr*tile_w+lc)*2
+            if px_off+2 > len(raw): return None
+            dn = struct.unpack_from(f"{fmt}H", raw, px_off)[0]
+            # Sample 3x3 and return median of valid DNs
+            valid_dns = []
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    lc2=(col+dc)%tile_w; lr2=(row+dr)%tile_h
+                    px2=(lr2*tile_w+lc2)*2
+                    if px2+2<=len(raw):
+                        dn2=struct.unpack_from(f"{fmt}H",raw,px2)[0]
+                        if 0 < dn2 < 30000:
+                            valid_dns.append(dn2)
+            if not valid_dns: return None
+            import statistics
+            return int(statistics.median(valid_dns))
         except Exception:
             return None
 
-    # Search for S2 scenes
+    lngs = [c[0] for c in polygon]
+    lats  = [c[1] for c in polygon]
+    bbox  = [min(lngs), min(lats), max(lngs), max(lats)]
+    lat_c = (bbox[1]+bbox[3])/2
+    lng_c = (bbox[0]+bbox[2])/2
+
     try:
         r = requests.post(
             "https://earth-search.aws.element84.com/v1/search",
-            json={
-                "collections": ["sentinel-2-l2a"],
-                "bbox": bbox,
-                "datetime": f"{start_date}T00:00:00Z/{end_date}T23:59:59Z",
-                "limit": 200
-            }, timeout=30
+            json={"collections":["sentinel-2-l2a"],
+                  "bbox": bbox,
+                  "datetime": f"{start_date}T00:00:00Z/{end_date}T23:59:59Z",
+                  "limit": 200},
+            timeout=30
         )
         features = r.json().get("features", [])
     except Exception:
         return {}, {}
 
-    # Best observation per month (lowest cloud cover)
+    # Best (lowest cloud) per month — filter by margin to avoid swath edges
     monthly_candidates = {}
-
     for f in features:
         date_str = f["properties"].get("datetime","")[:10]
         if not date_str: continue
         month = int(date_str.split("-")[1])
         cloud = f["properties"].get("eo:cloud_cover", 100)
-        if cloud > 85: continue  # skip very cloudy
-
-        assets = f.get("assets", {})
+        if cloud > 90: continue
+        # Check parcel centroid is well inside scene bbox
+        scene_bbox = f.get("bbox", [])
+        if scene_bbox:
+            margin = min(lat_c-scene_bbox[1], scene_bbox[3]-lat_c,
+                        lng_c-scene_bbox[0], scene_bbox[2]-lng_c)
+            if margin < 0.05: continue
+        assets = f.get("assets",{})
         red_url = assets.get("red",{}).get("href","")
         nir_url = assets.get("nir",{}).get("href","")
         re1_url = assets.get("rededge1",{}).get("href","")
-        scl_url = assets.get("scl",{}).get("href","")
         if not red_url or not nir_url: continue
-
         if month not in monthly_candidates or cloud < monthly_candidates[month][0]:
-            monthly_candidates[month] = (cloud, red_url, nir_url, re1_url, date_str)
+            monthly_candidates[month] = (cloud, red_url, nir_url, re1_url)
 
     monthly_ndvi = {}
     monthly_ndre = {}
-
-    for month, (cloud, red_url, nir_url, re1_url, date_str) in monthly_candidates.items():
-        red_dn = read_s2_pixel(red_url, lat_c, lng_c)
-        nir_dn = read_s2_pixel(nir_url, lat_c, lng_c)
-        re1_dn = read_s2_pixel(re1_url, lat_c, lng_c) if re1_url else None
-
-        if red_dn and nir_dn and red_dn > 0:
-            ndvi = (nir_dn - red_dn) / (nir_dn + red_dn + 0.0001)
+    for month, (cloud, red_url, nir_url, re1_url) in monthly_candidates.items():
+        red = read_s2_pixel(red_url, lat_c, lng_c)
+        nir = read_s2_pixel(nir_url, lat_c, lng_c)
+        re1 = read_s2_pixel(re1_url, lat_c, lng_c) if re1_url else None
+        if red and nir and red > 0:
+            ndvi = (nir-red)/(nir+red+0.0001)
             if -1 < ndvi < 1.5:
                 monthly_ndvi[month] = round(ndvi, 4)
-            if re1_dn and re1_dn > 0:
-                ndre = (nir_dn - re1_dn) / (nir_dn + re1_dn + 0.0001)
+            if re1 and re1 > 0:
+                ndre = (nir-re1)/(nir+re1+0.0001)
                 if -1 < ndre < 1.5:
                     monthly_ndre[month] = round(ndre, 4)
 
