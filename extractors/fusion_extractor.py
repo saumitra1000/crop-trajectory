@@ -19,7 +19,7 @@ def get_token(client_id, client_secret):
     r = requests.post(
         "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
         data={"client_id": client_id, "client_secret": client_secret,
-              "grant_type": "client_credentials"}, timeout=30)
+              "grant_type": "client_credentials"}, timeout=15)
     return r.json().get("access_token")
 
 
@@ -48,7 +48,7 @@ def get_optical_monthly(polygon, client_id, client_secret, token=None,
         return x, y
 
     def fetch_range(url, s, e):
-        r = requests.get(url, headers={"Range": f"bytes={s}-{e-1}"}, timeout=30)
+        r = requests.get(url, headers={"Range": f"bytes={s}-{e-1}"}, timeout=15)
         if r.status_code not in [200, 206]:
             raise Exception(f"HTTP {r.status_code}")
         return r.content
@@ -131,6 +131,11 @@ def get_optical_monthly(polygon, client_id, client_secret, token=None,
     bbox  = [min(lngs), min(lats), max(lngs), max(lats)]
     lat_c = (bbox[1]+bbox[3])/2
     lng_c = (bbox[0]+bbox[2])/2
+    # Sample polygon vertices (evenly spaced) + centroid
+    step = max(1, len(polygon)//5)  # max 5 sample points
+    sample_pts = [(polygon[i][1], polygon[i][0]) for i in range(0, len(polygon), step)]
+    sample_pts.append((lat_c, lng_c))
+    sample_pts = sample_pts[:6]  # max 6 points
 
     try:
         r = requests.post(
@@ -139,7 +144,7 @@ def get_optical_monthly(polygon, client_id, client_secret, token=None,
                   "bbox": bbox,
                   "datetime": f"{start_date}T00:00:00Z/{end_date}T23:59:59Z",
                   "limit": 200},
-            timeout=30
+            timeout=15
         )
         features = r.json().get("features", [])
     except Exception:
@@ -169,19 +174,30 @@ def get_optical_monthly(polygon, client_id, client_secret, token=None,
 
     monthly_ndvi = {}
     monthly_ndre = {}
+    import statistics as _stats
     for month, (cloud, red_url, nir_url, re1_url) in monthly_candidates.items():
-        red = read_s2_pixel(red_url, lat_c, lng_c)
-        nir = read_s2_pixel(nir_url, lat_c, lng_c)
-        re1 = read_s2_pixel(re1_url, lat_c, lng_c) if re1_url else None
-        if red and nir and 5 < red < 10000 and 5 < nir < 15000:
-            ndvi = (nir-red)/(nir+red+0.0001)
-            if 0.0 <= ndvi <= 1.0:
-                monthly_ndvi[month] = round(ndvi, 4)
-
-            if re1 and 5 < re1 < 15000:
-                ndre = (nir-re1)/(nir+re1+0.0001)
-                if 0.0 <= ndre <= 1.0:
-                    monthly_ndre[month] = round(ndre, 4)
+        ndvi_vals = []
+        ndre_vals = []
+        for slat, slng in sample_pts:
+            red = read_s2_pixel(red_url, slat, slng)
+            nir = read_s2_pixel(nir_url, slat, slng)
+            re1 = read_s2_pixel(re1_url, slat, slng) if re1_url else None
+            if red and nir and 0 < red < 60000 and 0 < nir < 60000:
+                ndvi = (nir-red)/(nir+red+0.0001)
+                if -0.5 < ndvi < 1.0:
+                    ndvi_vals.append(ndvi)
+                if re1 and 0 < re1 < 60000:
+                    ndre = (nir-re1)/(nir+re1+0.0001)
+                    if -0.5 < ndre < 1.0:
+                        ndre_vals.append(ndre)
+        if ndvi_vals:
+            med = _stats.median(ndvi_vals)
+            if -0.5 < med < 1.0:
+                monthly_ndvi[month] = round(med, 4)
+        if ndre_vals:
+            med = _stats.median(ndre_vals)
+            if -0.5 < med < 1.0:
+                monthly_ndre[month] = round(med, 4)
 
     return monthly_ndvi, monthly_ndre
 
