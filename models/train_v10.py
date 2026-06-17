@@ -19,16 +19,33 @@ data   = [d for d in data if d['label'] in CM]
 labels = [CM[d['label']] for d in data]
 print('Classes:', Counter(labels))
 
+# Regional monthly medians — fallback for cloud-obscured months
+def regional_medians(all_data, key):
+    meds = []
+    for m in range(1,13):
+        vals = []
+        for d in all_data:
+            v = d[key].get(str(m), d[key].get(m))
+            if v: vals.append(float(v))
+        meds.append(float(np.median(vals)) if vals else 0.0)
+    return np.array(meds)
+
+ndvi_reg = regional_medians(data, 'monthly_ndvi')
+vh_reg   = regional_medians(data, 'monthly_vh')
+ndre_reg = regional_medians(data, 'monthly_ndre')
+
 def gm(dic, m):
     v = dic.get(str(m), dic.get(m, 0))
     return float(v) if v else np.nan
 
-def interpolate(arr):
+def interpolate(arr, fallback=None):
     x = np.arange(12)
     mask = ~np.isnan(arr)
     if mask.sum() >= 2:
         return np.interp(x, x[mask], arr[mask])
-    return arr
+    elif mask.sum() == 1:
+        return np.full(12, arr[mask][0])
+    return fallback if fallback is not None else np.zeros(12)
 
 def featurize(d):
     nd = np.array([gm(d['monthly_ndvi'], m) for m in range(1,13)])
@@ -37,7 +54,7 @@ def featurize(d):
     nr = np.array([gm(d['monthly_ndre'], m) for m in range(1,13)])
 
     # Interpolate NDVI to fill cloud gaps
-    ndi = interpolate(nd)
+    ndi = interpolate(nd, fallback=ndvi_reg)
 
     # SAR linear power
     vhl = np.where(~np.isnan(vh), 10**(np.clip(vh,-50,0)/10), np.nan)
@@ -45,6 +62,8 @@ def featurize(d):
     mask = (~np.isnan(vhl)) & (~np.isnan(vvl)) & (vhl > 1e-10)
     ratio = np.where(mask, vvl/(vhl+1e-10), np.nan)
 
+    vli = interpolate(vhl, fallback=10**(np.clip(vh_reg,-50,0)/10))
+    nri = interpolate(nr,  fallback=ndre_reg)
     vhl_v = vhl[~np.isnan(vhl)]
     ratio_v = ratio[~np.isnan(ratio)]
 
@@ -80,15 +99,15 @@ def featurize(d):
     ratio_may  = s(ratio[4])
     ratio_aug  = s(ratio[7])
     # VH drop at harvest (cereal harvest = sudden VH decrease)
-    vh_may = s(vhl[4]); vh_aug = s(vhl[7])
-    vh_drop = s(vhl[4] - vhl[7]) if not (np.isnan(vhl[4]) or np.isnan(vhl[7])) else np.nan
+    vh_may = s(vli[4]); vh_aug = s(vli[7])
+    vh_drop = s(vli[4] - vli[7]) if not (np.isnan(vli[4]) or np.isnan(vli[7])) else np.nan
     # SAR minimum month (harvest timing)
     vh_peak_m = float(np.nanargmax(np.nan_to_num(vhl, nan=-99)) + 1)
     # Temporal variance
     vh_range = s(np.max(vhl_v) - np.min(vhl_v)) if len(vhl_v)>1 else np.nan
 
     # NDRE (sensitive to nitrogen/chlorophyll — barley vs wheat differ)
-    nr_apr = s(nr[3]); nr_may = s(nr[4])
+    nr_apr = s(nri[3]); nr_may = s(nri[4])
 
     area = float(d.get('area_ha', 0))
 
@@ -96,7 +115,7 @@ def featurize(d):
     nd_diff = np.diff(ndi)
     greenup_accel = float(np.argmax(nd_diff)+1)  # Spring=May/Jun, Winter=Mar/Apr
     # Late-summer SAR divergence (harvest vs broadleaf)
-    sar_div = s(vhl[5]-vhl[7]) if not(np.isnan(vhl[5]) or np.isnan(vhl[7])) else np.nan
+    sar_div = s(vli[5]-vli[7]) if not(np.isnan(vli[5]) or np.isnan(vli[7])) else np.nan
     # Winter vs spring indicator (Jan NDVI high=winter, low=spring)
     winter_ind = s(ndi[0]-ndi[4])  # negative=spring crop, positive=winter crop
 
