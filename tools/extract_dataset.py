@@ -31,11 +31,17 @@ for p in parcels:
         p["properties"]["CROP_CLASS"]=cls
         by_class[cls].append(p)
 
-balanced=[]
+per_class={}
 for cls,target in TARGETS.items():
     take=min(len(by_class[cls]),target)
-    balanced.extend(by_class[cls][:take])
+    per_class[cls]=by_class[cls][:take]
     print(f"  {cls:<15} {take}")
+balanced=[]
+max_len=max(len(v) for v in per_class.values())
+for i in range(max_len):
+    for cls in TARGETS:
+        if i<len(per_class[cls]):
+            balanced.append(per_class[cls][i])
 print(f"  {'TOTAL':<15} {len(balanced)}")
 
 CHECKPOINT="data/extraction_new_checkpoint.json"

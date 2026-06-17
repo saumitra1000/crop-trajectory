@@ -9,7 +9,7 @@ from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_val_
 from sklearn.metrics import confusion_matrix
 from collections import Counter
 
-with open('/workspaces/crop-trajectory/data/psetae_100_fullseason.json') as f:
+with open('/workspaces/crop-trajectory/data/dataset_535.json') as f:
     data = json.load(f)
 
 CM = {'Grassland':'Grassland','Barley':'Barley','Wheat':'Wheat',
@@ -92,7 +92,16 @@ def featurize(d):
 
     area = float(d.get('area_ha', 0))
 
+    # Green-up acceleration — month of fastest NDVI increase
+    nd_diff = np.diff(ndi)
+    greenup_accel = float(np.argmax(nd_diff)+1)  # Spring=May/Jun, Winter=Mar/Apr
+    # Late-summer SAR divergence (harvest vs broadleaf)
+    sar_div = s(vhl[5]-vhl[7]) if not(np.isnan(vhl[5]) or np.isnan(vhl[7])) else np.nan
+    # Winter vs spring indicator (Jan NDVI high=winter, low=spring)
+    winter_ind = s(ndi[0]-ndi[4])  # negative=spring crop, positive=winter crop
+
     return [peak_m, trough_m, pk, mn, rng, gu, hd, rc, ww, osr, maize,
+            greenup_accel, sar_div, winter_ind,
             n_jun, n_jul, n_aug,
             mean_vh, std_vh, mean_ratio, ratio_may, ratio_aug,
             vh_drop, vh_peak_m, vh_range, vh_may, vh_aug,
