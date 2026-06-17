@@ -630,6 +630,27 @@ def parcel_intelligence(request: ParcelRequest):
         sar_time_series = analyse_time_series(available)
         analysis = full_field_analysis(available)
 
+        # CatBoost ML classifier
+        try:
+            from tools.inference_driver import predict_live_lpis_parcel
+            cat_crop, cat_conf = predict_live_lpis_parcel(
+                parcel["geometry"]["coordinates"],
+                area_ha=float(area or 5.0)
+            )
+            cat_crop_str = str(cat_crop).strip("[]'")
+            analysis["catboost_classifier"] = {
+                "crop_type": cat_crop_str,
+                "confidence_pct": round(float(cat_conf) * 100, 1),
+                "tier": (
+                    "Tier1" if cat_conf >= 0.60
+                    else "Tier2" if cat_conf >= 0.45
+                    else "Tier3"
+                ),
+                "model": "CatBoost 7-class, 540 parcels, Tier1=90% precision"
+            }
+        except Exception as e:
+            analysis["catboost_classifier"] = {"error": str(e)}
+
         # Add SAR time series to response
         analysis["sar_time_series"] = {
             "crop_type": sar_time_series["crop_type"],
@@ -763,9 +784,9 @@ def parcel_intelligence(request: ParcelRequest):
                 "average": avg_var,
                 "interpretation": (
                     "Uniform crop development"
-                    if avg_var and avg_var < 0.35 else
+                    if avg_var is not None and avg_var < 0.35 else
                     "Moderate within-field variation"
-                    if avg_var and avg_var < 0.45 else
+                    if avg_var is not None and avg_var < 0.45 else
                     "High within-field variation"
                 )
             },
