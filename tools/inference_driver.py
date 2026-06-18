@@ -97,6 +97,14 @@ def predict_from_observations(polygon_geometry, client_id, client_secret, sar_ob
             
         if not feat_dict or not isinstance(feat_dict, dict):
             return {"crop_type": "Unknown", "predicted_crop": "Unknown", "confidence_pct": 0.0, "tier": "Tier3", "automated_delivery": False}
+
+        # Quality gate: reject if insufficient optical data
+        n_ndvi = feat_dict.get("n_ndvi", 0)
+        if n_ndvi < 7:
+            return {"crop_type": "Unknown", "predicted_crop": "Unknown",
+                    "confidence_pct": 0.0, "tier": "Tier3",
+                    "automated_delivery": False,
+                    "rejection_reason": f"Insufficient optical data: {n_ndvi}/12 months (need >=7)"}
     except Exception as e:
         return {"crop_type": "Unknown", "predicted_crop": "Unknown", "confidence_pct": 0.0, "tier": "Tier3", "automated_delivery": False}
 
