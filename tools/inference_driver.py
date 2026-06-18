@@ -18,7 +18,7 @@ def get_current_season_window():
 
 from rasterio.windows import Window
 
-sys.path.insert(0, '/workspaces/crop-trajectory')
+import os as _os; sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 from extractors.fusion_extractor import extract_fusion_features
 from tools.sar_cache import read_sar_cache, write_sar_cache
 
@@ -61,9 +61,9 @@ def predict_from_observations(polygon_geometry, client_id, client_secret, sar_ob
     Reuses pre-mined SAR telemetry observation vectors to achieve sub-second runtime speeds.
     """
     try:
-        model = joblib.load("/workspaces/crop-trajectory/models/production_catboost_7class.pkl")
-        le = joblib.load("/workspaces/crop-trajectory/models/encoder_7class.pkl")
-        opt_indices = joblib.load("/workspaces/crop-trajectory/models/optimal_indices.pkl")
+        model = joblib.load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "production_catboost_7class.pkl"))
+        le = joblib.load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "encoder_7class.pkl"))
+        opt_indices = joblib.load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "optimal_indices.pkl"))
     except Exception as e:
         print("❌ Model load error:", e)
         return {"crop_type": "Unknown", "predicted_crop": "Unknown", "confidence_pct": 0.0, "tier": "Tier3", "automated_delivery": False}
