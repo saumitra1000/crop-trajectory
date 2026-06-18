@@ -25,7 +25,7 @@ def read_sar_cache(parcel_id, start_date):
 
 def write_sar_cache(parcel_id, start_date, data_dict):
     """Persists extracted STAC/SAR sensor feature matrices to local disk storage"""
-    if not data_dict or not isinstance(data_dict, dict):
+    if not data_dict or not isinstance(data_dict, (dict, list)):
         return False
     target = get_cache_path(parcel_id, start_date)
     try:
