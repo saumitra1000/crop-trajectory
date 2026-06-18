@@ -630,11 +630,13 @@ def parcel_intelligence(request: ParcelRequest):
         sar_time_series = analyse_time_series(available)
         analysis = full_field_analysis(available)
 
-        # CatBoost ML classifier
+        # CatBoost ML classifier — reuse pre-fetched SAR, no second network call
         try:
-            from tools.inference_driver import predict_live_lpis_parcel
-            cat_crop, cat_conf = predict_live_lpis_parcel(
+            from tools.inference_driver import predict_from_observations
+            cat_crop, cat_conf = predict_from_observations(
                 parcel["geometry"]["coordinates"],
+                CLIENT_ID, CLIENT_SECRET,
+                sar_observations=obs,
                 area_ha=float(area or 5.0)
             )
             cat_crop_str = str(cat_crop).strip("[]'")
