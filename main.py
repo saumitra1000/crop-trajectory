@@ -590,11 +590,27 @@ def parcel_intelligence(request: ParcelRequest):
             today.year-1, 10, 1).strftime("%Y-%m-%d")
         season_end = today.strftime("%Y-%m-%d")
 
-        obs = get_sar_timeseries_polygon(
-            coords, season_start, season_end,
-            CLIENT_ID, CLIENT_SECRET,
-            interval_days=12
-        )
+        # Check SAR observation cache first
+        _par_id = props.get("PAR_LAB") or props.get("HERD") or "UNKNOWN"
+        try:
+            from tools.sar_cache import read_sar_cache, write_sar_cache
+            _cached, _hit = read_sar_cache(_par_id + "_obs", season_start)
+            if _hit and isinstance(_cached, list):
+                obs = _cached
+            else:
+                obs = get_sar_timeseries_polygon(
+                    coords, season_start, season_end,
+                    CLIENT_ID, CLIENT_SECRET,
+                    interval_days=12
+                )
+                if obs:
+                    write_sar_cache(_par_id + "_obs", season_start, obs)
+        except Exception:
+            obs = get_sar_timeseries_polygon(
+                coords, season_start, season_end,
+                CLIENT_ID, CLIENT_SECRET,
+                interval_days=12
+            )
         available = [o for o in obs if o.get("available")]
 
         if not available:
