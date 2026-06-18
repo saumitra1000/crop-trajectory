@@ -5,7 +5,7 @@ import numpy as np
 import warnings
 warnings.filterwarnings("ignore")
 
-sys.path.insert(0, '/workspaces/crop-trajectory')
+import os as _os2; sys.path.insert(0, _os2.path.dirname(_os2.path.dirname(_os2.path.abspath(__file__))))
 from tools.inference_driver import predict_from_observations
 from tools.consensus_engine import evaluate_crop_consensus
 
@@ -96,11 +96,11 @@ def execute_batch_geojson_classification(input_path, output_path):
     with open(output_path, "w") as f:
         json.dump({"type": "FeatureCollection", "features": auto_accept_features}, f, indent=2)
         
-    review_queue_path = "/workspaces/crop-trajectory/data/review_queue.geojson"
+    review_queue_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "review_queue.geojson")
     with open(review_queue_path, "w") as f:
         json.dump({"type": "FeatureCollection", "features": review_queue_features}, f, indent=2)
         
     print(f"\n📊 Batch Processing Complete. Review Queue count: {t2} fields.")
 
 if __name__ == "__main__":
-    execute_batch_geojson_classification("/workspaces/crop-trajectory/data/real_parcel.json", "/workspaces/crop-trajectory/data/classified_parcels.geojson")
+    execute_batch_geojson_classification(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "real_parcel.json"), os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "classified_parcels.geojson"))

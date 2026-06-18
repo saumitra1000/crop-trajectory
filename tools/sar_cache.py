@@ -1,7 +1,8 @@
 import json
 import os
 
-CACHE_DIR = "/workspaces/crop-trajectory/data/sar_cache"
+import os as _os
+CACHE_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "data", "sar_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 def get_cache_path(parcel_id, start_date):
