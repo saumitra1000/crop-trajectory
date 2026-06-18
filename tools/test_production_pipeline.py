@@ -2,11 +2,15 @@ import pytest
 import numpy as np
 import json
 import os
-import joblib
 import sys
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+import tools.inference_driver
+import tools.batch_geojson_classifier
+
 from tools.inference_driver import normalize_to_coordinate_ring, generate_interior_points, predict_live_lpis_parcel
 
 def test_normalize_standard_polygon():
@@ -39,7 +43,7 @@ def test_generate_interior_points_safety():
 @patch('tools.inference_driver.extract_fusion_features')
 def test_tier1_automated_delivery(mock_extract, mock_joblib):
     mock_model = Mock()
-    mock_model.predict.return_value = np.array([[4]])
+    mock_model.predict.return_value = np.array([4])
     mock_model.predict_proba.return_value = np.array([[0.05, 0.05, 0.05, 0.05, 0.80, 0.05, 0.05]])
     
     mock_le = Mock()
@@ -63,7 +67,7 @@ def test_tier1_automated_delivery(mock_extract, mock_joblib):
 @patch('tools.inference_driver.extract_fusion_features')
 def test_tier3_gated_rejection(mock_extract, mock_joblib):
     mock_model = Mock()
-    mock_model.predict.return_value = np.array([[2]])
+    mock_model.predict.return_value = np.array([2])
     mock_model.predict_proba.return_value = np.array([[0.10, 0.10, 0.25, 0.15, 0.10, 0.10, 0.20]])
     
     mock_le = Mock()
@@ -83,7 +87,7 @@ def test_tier3_gated_rejection(mock_extract, mock_joblib):
     assert "Unknown" in str(pred)
     assert conf == 0.25
 
-@patch('tools.batch_geojson_classifier.predict_live_lpis_parcel')
+@patch.object(tools.batch_geojson_classifier, 'predict_live_lpis_parcel')
 def test_batch_geojson_schema_validation(mock_predict):
     mock_predict.return_value = ("Grassland", 0.95)
     mock_input = "/tmp/test_input.geojson"
@@ -101,8 +105,7 @@ def test_batch_geojson_schema_validation(mock_predict):
     with open(mock_input, "w") as f:
         json.dump(mock_input_data, f)
         
-    from tools.batch_geojson_classifier import execute_batch_geojson_classification
-    execute_batch_geojson_classification(mock_input, mock_output)
+    tools.batch_geojson_classifier.execute_batch_geojson_classification(mock_input, mock_output)
     
     assert os.path.exists(mock_output)
     with open(mock_output, "r") as f:
