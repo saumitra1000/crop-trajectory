@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings('ignore')
 from rasterio.windows import Window
 
-sys.path.insert(0, '/workspaces/crop-trajectory')
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from extractors.fusion_extractor import extract_fusion_features
 
 VALID_SCL = {4, 5, 7}
@@ -55,9 +55,11 @@ def predict_from_observations(polygon_geometry, client_id, client_secret, sar_ob
     to completely eliminate duplicate network loops over Copernicus CDSE STAC servers.
     """
     try:
-        model = joblib.load("/workspaces/crop-trajectory/models/production_catboost_7class.pkl")
-        le = joblib.load("/workspaces/crop-trajectory/models/encoder_7class.pkl")
-        opt_indices = joblib.load("/workspaces/crop-trajectory/models/optimal_indices.pkl")
+        import os
+        _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        model = joblib.load(os.path.join(_base, "models", "production_catboost_7class.pkl"))
+        le = joblib.load(os.path.join(_base, "models", "encoder_7class.pkl"))
+        opt_indices = joblib.load(os.path.join(_base, "models", "optimal_indices.pkl"))
     except Exception as e:
         print("❌ Model load error:", e)
         return "Unknown", 0.0
