@@ -73,7 +73,9 @@ def predict_from_observations(polygon_geometry, client_id, client_secret, sar_ob
         return {"crop_type": "Unknown", "predicted_crop": "Unknown", "confidence_pct": 0.0, "tier": "Tier3", "automated_delivery": False}
         
     try:
-        start_date, end_date = get_current_season_window()
+        # Use training season — model trained on Oct2024-Sep2025
+        # Switch to dynamic window only after retraining on current season
+        start_date, end_date = "2024-10-01", "2025-09-30"
         parcel_id = kwargs.get("parcel_id", "UNKNOWN")
         
         # Check cache via parcel_id + season key match to optimize network load
