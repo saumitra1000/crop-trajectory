@@ -5,3 +5,10 @@ numpy
 tifffile
 matplotlib
 python-multipart
+
+# ML inference dependencies
+catboost
+scikit-learn
+joblib
+rasterio
+pyproj

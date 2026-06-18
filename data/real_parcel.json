@@ -1,0 +1,73 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "parcel_id": "IE-LPIS-8812",
+        "area_ha": 4.1
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -7.915,
+              53.342
+            ],
+            [
+              -7.91,
+              53.342
+            ],
+            [
+              -7.91,
+              53.347
+            ],
+            [
+              -7.915,
+              53.347
+            ],
+            [
+              -7.915,
+              53.342
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "parcel_id": "IE-LPIS-9923",
+        "area_ha": 2.9
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -8.125,
+              52.412
+            ],
+            [
+              -8.12,
+              52.412
+            ],
+            [
+              -8.12,
+              52.417
+            ],
+            [
+              -8.125,
+              52.417
+            ],
+            [
+              -8.125,
+              52.412
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

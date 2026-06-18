@@ -147,14 +147,22 @@ def get_sar_timeseries_polygon(polygon_coords, start_date, end_date,
     except Exception:
         return []
 
+    from datetime import datetime, timedelta
     observations = []
+    scenes_to_fetch = []
     seen_dates = set()
+    last_kept = None
 
-    for f in features:
+    for f in sorted(features, key=lambda x: x["properties"].get("datetime","")):
         date_str = f["properties"].get("datetime", "")[:10]
-        if not date_str or date_str in seen_dates:
+        if not date_str: continue
+        # Apply interval filter
+        curr_date = datetime.strptime(date_str, "%Y-%m-%d")
+        if last_kept and (curr_date - last_kept).days < interval_days:
             continue
+        if date_str in seen_dates: continue
         seen_dates.add(date_str)
+        last_kept = curr_date
 
         vh_url = s3_to_https(f["assets"].get("vh", {}).get("href", ""))
         vv_url = s3_to_https(f["assets"].get("vv", {}).get("href", ""))
@@ -165,21 +173,22 @@ def get_sar_timeseries_polygon(polygon_coords, start_date, end_date,
 
         print(f"Fetching SAR polygon {date_str}...")
 
+        scenes_to_fetch.append((date_str, vh_url, vv_url))
+
+    # Parallel fetch
+    from concurrent.futures import ThreadPoolExecutor
+    def fetch_scene(args):
+        date_str, vh_url, vv_url = args
         vh_db = read_pixel_gcp(vh_url, lat_c, lng_c)
         vv_db = read_pixel_gcp(vv_url, lat_c, lng_c) if vv_url else None
-
         if vh_db is not None:
             vh_lin = 10 ** (vh_db / 10)
             vv_lin = 10 ** (vv_db / 10) if vv_db else None
-            rvi = round(min(1.0, (4*vh_lin)/((vv_lin or vh_lin)+vh_lin+1e-10)), 4) if vv_lin else None
-            observations.append({
-                "date":      date_str,
-                "available": True,
-                "vh":        vh_db,
-                "vv":        vv_db,
-                "rvi":       rvi
-            })
-        else:
-            observations.append({"date": date_str, "available": False})
+            rvi = round(min(1.0,(4*vh_lin)/((vv_lin or vh_lin)+vh_lin+1e-10)),4) if vv_lin else None
+            return {"date":date_str,"available":True,"vh":vh_db,"vv":vv_db,"rvi":rvi}
+        return {"date":date_str,"available":False}
 
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(fetch_scene, scenes_to_fetch))
+    observations.extend(results)
     return sorted(observations, key=lambda x: x["date"])

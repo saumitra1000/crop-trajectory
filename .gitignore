@@ -220,3 +220,6 @@ data/Crop Recommender*
 data/*.pkl
 data/*.zip
 data/model.ipynb
+data/extraction_new_checkpoint.json
+catboost_info/
+data/classified_parcels.geojson
