@@ -633,16 +633,18 @@ def parcel_intelligence(request: ParcelRequest):
         # CatBoost ML classifier — reuse pre-fetched SAR, no second network call
         try:
             from tools.inference_driver import predict_from_observations
-            cat_crop, cat_conf = predict_from_observations(
+            cat_result = predict_from_observations(
                 parcel["geometry"]["coordinates"],
                 CLIENT_ID, CLIENT_SECRET,
                 sar_observations=obs,
                 area_ha=float(area or 5.0)
             )
-            cat_crop_str = str(cat_crop).strip("[]'")
+            cat_crop_str = str(cat_result.get("crop_type", "Unknown"))
+            cat_conf_pct = float(cat_result.get("confidence_pct", 0.0))
+            cat_conf = cat_conf_pct / 100.0
             analysis["catboost_classifier"] = {
                 "crop_type": cat_crop_str,
-                "confidence_pct": round(float(cat_conf) * 100, 1),
+                "confidence_pct": cat_conf_pct,
                 "tier": (
                     "Tier1" if cat_conf >= 0.60
                     else "Tier2" if cat_conf >= 0.45
