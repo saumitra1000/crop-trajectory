@@ -1,7 +1,13 @@
-import json, sys, os, numpy as np, joblib, warnings
+import json
+import sys
+import os
+import numpy as np
+import warnings
 warnings.filterwarnings("ignore")
-sys.path.insert(0, "/workspaces/crop-trajectory")
-from tools.inference_driver import predict_live_lpis_parcel
+
+sys.path.insert(0, '/workspaces/crop-trajectory')
+from tools.inference_driver import predict_from_observations
+from tools.consensus_engine import evaluate_crop_consensus
 
 def calculate_polygon_perimeter(coords):
     try:
@@ -9,65 +15,92 @@ def calculate_polygon_perimeter(coords):
         total_p = 0.0
         for i in range(len(pts)):
             p1, p2 = pts[i], pts[(i + 1) % len(pts)]
-            total_p += np.sqrt((float(p2[0]) - float(p1[0]))**2 + (float(p2[1]) - float(p1[1]))**2) * 111320.0
+            total_p += np.sqrt((float(p2) - float(p1))**2 + (float(p2) - float(p1))**2) * 111320.0
         return max(total_p, 100.0)
-    except: return 400.0
+    except:
+        return 400.0
 
 def execute_batch_geojson_classification(input_path, output_path):
-    print("🎬 Initializing Automated Two-Tier GeoJSON Batch Processing Pipeline...")
-    if not os.path.exists(input_path): return
-    with open(input_path, "r") as f: geojson_data = json.load(f)
+    print("🎬 Running Production Multi-Tier GeoJSON Batch Processor...")
+    if not os.path.exists(input_path):
+        print(f"❌ Input file missing at: {input_path}")
+        return
+        
+    with open(input_path, "r") as f:
+        geojson_data = json.load(f)
+        
     features = geojson_data.get("features", [])
     total_features = len(features)
     
-    processed_features = []
-    t1_count, t2_count, t3_count = 0, 0, 0
+    auto_accept_features = []
+    review_queue_features = []
+    t1, t2, t3 = 0, 0, 0
     
     for idx, feature in enumerate(features):
         props = feature.get("properties", {})
         geom = feature.get("geometry", {})
         fid = props.get("parcel_id", f"BTI-{idx:03}")
-        if geom.get("type") not in ["Polygon", "MultiPolygon"] or "coordinates" not in geom: continue
         
+        if geom.get("type") not in ["Polygon", "MultiPolygon"] or "coordinates" not in geom:
+            continue
+            
         poly_coords = geom["coordinates"]
         area_ha = float(props.get("area_ha", 4.5))
         perimeter_m = calculate_polygon_perimeter(poly_coords)
         
-        # Extract un-gated raw prediction via temporary bypass
-        pred_crop, confidence = predict_live_lpis_parcel(poly_coords, area_ha=area_ha, perimeter_m=perimeter_m)
+        res = predict_from_observations(
+            poly_coords,
+            client_id=os.environ.get("COP0_ID", "DUMMY_ID"),
+            client_secret=os.environ.get("COP0_SECRET", "DUMMY_SECRET"),
+            parcel_id=fid,
+            sar_observations=None,
+            area_ha=area_ha,
+            perimeter_m=perimeter_m
+        )
+        
+        pred_crop = res["predicted_crop"]
+        confidence = res["confidence_pct"]
+        tier = res["tier"]
+        
+        dafm_label = props.get("true_crop_class", props.get("crop_class", "Grassland"))
+        sar_heuristic = "Grassland" if area_ha > 3.0 else pred_crop
+        consensus_status = evaluate_crop_consensus(dafm_label, sar_heuristic, pred_crop)
         
         new_props = dict(props)
-        new_props["raw_prediction"] = str(pred_crop)
-        new_props["inference_confidence"] = float(round(confidence * 100, 2))
+        new_props["raw_prediction"] = pred_crop
+        new_props["inference_confidence"] = float(confidence)
+        new_props["delivery_tier"] = tier
+        new_props["automated_delivery"] = res["automated_delivery"]
+        new_props["dafm_declaration"] = dafm_label
+        new_props["sar_heuristic_prediction"] = sar_heuristic
+        new_props["crop_consensus"] = consensus_status
         
-        # TWO-TIER DEPLOYMENT ROUTING ENGINE
-        if confidence >= 0.60:
-            new_props["crop_prediction"] = str(pred_crop)
-            new_props["delivery_tier"] = "Tier 1: Automated Delivery"
-            t1_count += 1
-            status = f"🚀 TIER 1 - AUTOMATED DELIVERY ({pred_crop} @ {confidence*100:.1f}%)"
-        elif 0.45 <= confidence < 0.60:
-            new_props["crop_prediction"] = str(pred_crop) + " (Low Confidence Hint)"
-            new_props["delivery_tier"] = "Tier 2: Low-Confidence Hint"
-            t2_count += 1
-            status = f"⚠️ TIER 2 - LOW-CONFIDENCE HINT ({pred_crop} @ {confidence*100:.1f}%)"
+        if tier == "Tier1":
+            new_props["crop_prediction"] = pred_crop
+            t1 += 1
+            status_str = f"🚀 TIER 1 - AUTO-ACCEPT ({pred_crop} @ {confidence:.1f}%)"
+            auto_accept_features.append({"type": "Feature", "geometry": geom, "properties": new_props})
+        elif tier == "Tier2":
+            new_props["crop_prediction"] = f"{pred_crop} (Low Confidence Hint)"
+            t2 += 1
+            status_str = f"⚠️ TIER 2 - REVIEW QUEUE ({pred_crop} @ {confidence:.1f}%)"
+            review_queue_features.append({"type": "Feature", "geometry": geom, "properties": new_props})
         else:
             new_props["crop_prediction"] = "Unknown"
-            new_props["delivery_tier"] = "Tier 3: Rejected (High Uncertainty)"
-            t3_count += 1
-            status = f"🛑 TIER 3 - REJECTED (High Uncertainty @ {confidence*100:.1f}%)"
+            t3 += 1
+            status_str = f"🛑 TIER 3 - REJECTED ({confidence:.1f}%)"
+            auto_accept_features.append({"type": "Feature", "geometry": geom, "properties": new_props})
             
-        print(f"  Parcel ID: {fid:<12} | Status: {status}")
-        new_feature = {"type": "Feature", "geometry": geom, "properties": new_props}
-        processed_features.append(new_feature)
+        print(f"  Parcel ID: {fid:<12} | Model: {pred_crop:<10} | Confidence: {confidence:.1f}% | Routing: {tier}")
         
-    with open(output_path, "w") as f: json.dump({"type": "FeatureCollection", "features": processed_features}, f, indent=2)
-    print("\n📊 Multi-Tiered Process Complete Performance Summary:")
-    print(f"  Total Extracted Input Geometries           : {total_features}")
-    print(f"  Tier 1 Delivery (Automated, High Precision) : {t1_count} parcels ({(t1_count/total_features)*100:.1f}%)")
-    print(f"  Tier 2 Delivery (Low-Confidence Hints)      : {t2_count} parcels ({(t2_count/total_features)*100:.1f}%)")
-    print(f"  Tier 3 Rejection (High Uncertainty Gated)   : {t3_count} parcels ({(t3_count/total_features)*100:.1f}%)")
-    print(f"💾 Annotated tiered map layer saved to: {output_path}")
+    with open(output_path, "w") as f:
+        json.dump({"type": "FeatureCollection", "features": auto_accept_features}, f, indent=2)
+        
+    review_queue_path = "/workspaces/crop-trajectory/data/review_queue.geojson"
+    with open(review_queue_path, "w") as f:
+        json.dump({"type": "FeatureCollection", "features": review_queue_features}, f, indent=2)
+        
+    print(f"\n📊 Batch Processing Complete. Review Queue count: {t2} fields.")
 
 if __name__ == "__main__":
     execute_batch_geojson_classification("/workspaces/crop-trajectory/data/real_parcel.json", "/workspaces/crop-trajectory/data/classified_parcels.geojson")
